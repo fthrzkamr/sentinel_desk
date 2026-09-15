@@ -31,6 +31,12 @@ const routes = [
         meta: { permission: 'device.view' },
       },
       {
+        path: 'live-monitoring',
+        name: 'live-monitoring',
+        component: () => import('@/views/monitoring/LiveMonitoringView.vue'),
+        meta: { permission: 'monitoring.view' },
+      },
+      {
         path: 'agents',
         name: 'agents',
         component: () => import('@/views/agents/AgentTokensView.vue'),

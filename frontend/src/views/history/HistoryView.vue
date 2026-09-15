@@ -1,9 +1,12 @@
 <script setup>
 import { onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 import MetricTrendChart from '@/components/MetricTrendChart.vue'
 import { listDevices } from '@/services/devices'
 import { getMetricHistory } from '@/services/monitoring'
+
+const router = useRouter()
 
 const devices = ref([])
 const selectedDeviceId = ref('')
@@ -55,8 +58,8 @@ onMounted(async () => {
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h1 class="text-xl font-semibold text-slate-800">History</h1>
       <select
+        v-if="!isLoadingDevices && devices.length > 0"
         v-model="selectedDeviceId"
-        :disabled="isLoadingDevices || devices.length === 0"
         class="w-64 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
       >
         <option v-for="device in devices" :key="device.device_id" :value="device.device_id">
@@ -67,8 +70,18 @@ onMounted(async () => {
 
     <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-900/5">
       <div v-if="isLoadingDevices" class="py-10 text-center text-sm text-slate-400">Memuat data...</div>
-      <div v-else-if="devices.length === 0" class="py-10 text-center text-sm text-slate-400">
-        Belum ada device terdaftar.
+      <div v-else-if="devices.length === 0" class="flex flex-col items-center gap-3 py-14 text-center">
+        <p class="text-sm text-slate-500">Belum ada device yang terdaftar di sistem ini.</p>
+        <p class="max-w-sm text-xs text-slate-400">
+          Jalankan SentinelDesk Agent di komputer yang mau dipantau — daftarkan lewat enrollment token dari halaman
+          Agents, lalu grafik di sini otomatis muncul begitu agent mulai mengirim data.
+        </p>
+        <button
+          class="mt-1 rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
+          @click="router.push({ name: 'agents' })"
+        >
+          Buka halaman Agents
+        </button>
       </div>
       <div v-else-if="errorMessage" class="py-10 text-center text-sm text-red-500">{{ errorMessage }}</div>
       <div v-else-if="isLoadingHistory" class="py-10 text-center text-sm text-slate-400">Memuat grafik...</div>
