@@ -66,6 +66,12 @@ const routes = [
         component: () => import('@/views/audit/AuditLogsView.vue'),
         meta: { permission: 'audit.view' },
       },
+      {
+        path: 'history',
+        name: 'history',
+        component: () => import('@/views/history/HistoryView.vue'),
+        meta: { permission: 'monitoring.view' },
+      },
     ],
   },
 ]

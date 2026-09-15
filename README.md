@@ -505,6 +505,32 @@ layarnya sendiri — tidak ada mode diam-diam.
 - Diuji dengan `.exe` sungguhan (bukan cuma `python src/main.py`): dijalankan langsung dari `dist/SentinelDeskAgent.exe`, berhasil enroll device asli, key registry auto-start beneran muncul dan menunjuk ke path exe yang benar, dan setelah restart backend (menemukan bug `DeviceUser` di atas lewat testing ini juga) metrics loop berjalan stabil beberapa siklus berturut-turut. Device test, kredensial, dan key registry dibersihkan setelahnya.
 - Ketemu satu kuirk operasional (bukan bug aplikasi): Django `runserver` di dalam container dev sesekali tidak auto-reload saat file di-edit lewat bind mount di Docker Desktop/Windows (kelas masalah yang sama dengan kenapa Vite butuh `usePolling` — lihat Phase Docker) — kalau perubahan kode tidak kelihatan efeknya, `docker compose restart backend` menyelesaikannya.
 
+## Pengembangan tambahan (pasca-roadmap): grafik tren CPU/RAM/Disk
+
+Di luar 8 phase awal — ditambahkan setelah semuanya selesai, mengisi catatan
+"grafik tren historis menyusul di iterasi berikutnya" yang sempat ditulis di
+tab Metrics Device Detail.
+
+- `frontend/src/components/MetricTrendChart.vue` — line chart SVG custom
+  (tanpa library tambahan), 3 series CPU/RAM/Disk dengan warna kategorikal
+  tetap (biru/oranye/aqua) yang sudah divalidasi lolos cek keamanan warna
+  buta warna (colorblind-safe) via validator resmi. Ada crosshair + tooltip
+  saat hover, legend dengan label langsung (nilai terkini per metrik), dan
+  toggle "Lihat sebagai tabel" sebagai alternatif non-visual.
+- Dipasang di dua tempat: tab **Metrics** pada Device Detail (menggantikan
+  catatan placeholder lama), dan halaman **History** baru (`/history`,
+  sebelumnya "Soon" di sidebar) — pilih device dari dropdown, lihat tren
+  gabungan CPU/RAM/Disk-nya.
+- Menampilkan hingga 200 sampel metric terakhir per device (lewat endpoint
+  `GET /api/devices/{id}/history/` yang sudah ada sejak Phase 3) — diberi
+  label jujur "N sampel terakhir", bukan mengklaim rentang kalender tetap
+  (mis. "24 jam") yang sebenarnya tidak dijamin backend.
+- Diuji dengan data asli (40 sampel CPU/RAM/Disk yang benar-benar dikirim
+  lewat endpoint `/api/agent/metrics/`, bukan di-insert langsung ke
+  database) dan diverifikasi visual lewat browser sungguhan: kurva
+  tergambar benar, hover tooltip presisi menunjuk sampel terdekat, toggle
+  tabel bekerja, device test dibersihkan setelahnya.
+
 ## Testing cepat (manual)
 
 ```bash

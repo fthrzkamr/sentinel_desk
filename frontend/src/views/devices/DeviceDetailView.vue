@@ -5,11 +5,12 @@ import { useRoute, useRouter } from 'vue-router'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import LeafletMap from '@/components/LeafletMap.vue'
 import LiveScreenPanel from '@/components/LiveScreenPanel.vue'
+import MetricTrendChart from '@/components/MetricTrendChart.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import UsageBar from '@/components/UsageBar.vue'
 import { disableDevice, enableDevice, getDevice } from '@/services/devices'
 import { getDeviceLocationHistory } from '@/services/locations'
-import { getLatestMetric } from '@/services/monitoring'
+import { getLatestMetric, getMetricHistory } from '@/services/monitoring'
 import { listSoftware } from '@/services/software'
 import { useAuthStore } from '@/stores/auth'
 import { useMonitoringStore } from '@/stores/monitoring'
@@ -91,6 +92,25 @@ async function fetchLatestMetric() {
   }
 }
 
+const metricHistory = ref([])
+const isHistoryLoading = ref(false)
+const historyLoaded = ref(false)
+
+async function fetchMetricHistory() {
+  isHistoryLoading.value = true
+  try {
+    const { data } = await getMetricHistory(route.params.deviceId, { page_size: 200 })
+    // Backend orders newest-first (for the "latest sample" use case) — the
+    // chart needs chronological order left-to-right.
+    metricHistory.value = [...data.results].reverse()
+    historyLoaded.value = true
+  } catch {
+    metricHistory.value = []
+  } finally {
+    isHistoryLoading.value = false
+  }
+}
+
 const softwareList = ref([])
 const isSoftwareLoading = ref(false)
 const softwareSearch = ref('')
@@ -163,6 +183,7 @@ const locationMarkers = computed(() =>
 watch(activeTab, (tab) => {
   if (tab === 'software' && !softwareLoaded.value) fetchSoftware()
   if (tab === 'location' && !locationLoaded.value) fetchLocationHistory()
+  if (tab === 'metrics' && !historyLoaded.value) fetchMetricHistory()
 })
 
 onMounted(() => {
@@ -304,10 +325,12 @@ async function confirmToggle() {
                   <dd>{{ metric.recorded_at ? timeAgo(metric.recorded_at) : 'Live' }}</dd>
                 </div>
               </div>
-              <p class="text-xs text-slate-400">
-                Grafik tren historis CPU/RAM/Disk menyusul di iterasi berikutnya — saat ini menampilkan nilai
-                terkini (live via WebSocket).
-              </p>
+
+              <div class="border-t border-slate-100 pt-5">
+                <h3 class="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Tren CPU/RAM/Disk</h3>
+                <div v-if="isHistoryLoading" class="py-10 text-center text-sm text-slate-400">Memuat grafik...</div>
+                <MetricTrendChart v-else :samples="metricHistory" />
+              </div>
             </template>
           </div>
 
