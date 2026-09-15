@@ -39,8 +39,6 @@ const mergedDevices = computed(() =>
     ...device,
     status: liveFor(device)?.status || device.status,
     last_seen: liveFor(device)?.last_seen || device.last_seen,
-    cpu_percent: liveFor(device)?.cpu_percent ?? null,
-    ram_percent: liveFor(device)?.ram_percent ?? null,
   })),
 )
 
@@ -51,15 +49,6 @@ const counts = computed(() => {
   }
   return result
 })
-
-function average(key) {
-  const values = mergedDevices.value.map((d) => d[key]).filter((v) => v !== null && v !== undefined)
-  if (values.length === 0) return null
-  return Math.round(values.reduce((sum, v) => sum + v, 0) / values.length)
-}
-
-const avgCpu = computed(() => average('cpu_percent'))
-const avgRam = computed(() => average('ram_percent'))
 
 const recentlyActive = computed(() =>
   [...mergedDevices.value]
@@ -101,7 +90,7 @@ const greeting = computed(() => {
       </div>
     </div>
 
-    <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+    <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
       <StatCard label="Devices" :value="counts.total" color="blue">
         <template #icon>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5">
@@ -142,21 +131,6 @@ const greeting = computed(() => {
         </template>
       </StatCard>
 
-      <StatCard label="Avg CPU" :value="avgCpu === null ? '—' : `${avgCpu}%`" color="violet">
-        <template #icon>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3v1.5M15.75 3v1.5M8.25 19.5V21M15.75 19.5V21M3 8.25h1.5M3 15.75h1.5M19.5 8.25H21M19.5 15.75H21M5.25 6h13.5a1.5 1.5 0 011.5 1.5v9a1.5 1.5 0 01-1.5 1.5H5.25a1.5 1.5 0 01-1.5-1.5v-9a1.5 1.5 0 011.5-1.5Zm3 3h7.5v7.5h-7.5V9Z" />
-          </svg>
-        </template>
-      </StatCard>
-
-      <StatCard label="Avg RAM" :value="avgRam === null ? '—' : `${avgRam}%`" color="blue">
-        <template #icon>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 3.75c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
-          </svg>
-        </template>
-      </StatCard>
     </div>
 
     <div class="rounded-xl bg-white shadow-sm ring-1 ring-slate-900/5">
@@ -196,10 +170,5 @@ const greeting = computed(() => {
         </table>
       </div>
     </div>
-
-    <p class="text-xs text-slate-400">
-      Grafik tren (online device, CPU/RAM historis) dan panel Recent Alerts menyusul di iterasi
-      berikutnya sesuai roadmap.
-    </p>
   </div>
 </template>

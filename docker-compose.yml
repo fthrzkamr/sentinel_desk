@@ -45,6 +45,38 @@ services:
       redis:
         condition: service_healthy
 
+  celery_worker:
+    build: ./backend
+    container_name: sentineldesk_celery_worker
+    restart: unless-stopped
+    command: celery -A config worker -l info
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery_beat:
+    build: ./backend
+    container_name: sentineldesk_celery_beat
+    restart: unless-stopped
+    # Schedule itself (CELERY_BEAT_SCHEDULE) lives in config/settings/base.py,
+    # not the database — no django_celery_beat scheduler flag needed here.
+    command: celery -A config beat -l info
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   frontend:
     build: ./frontend
     container_name: sentineldesk_frontend

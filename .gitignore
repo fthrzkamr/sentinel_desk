@@ -10,6 +10,7 @@ __pycache__/
 *.pyc
 backend/staticfiles/
 backend/media/
+backend/celerybeat-schedule
 *.sqlite3
 
 # Node / frontend
