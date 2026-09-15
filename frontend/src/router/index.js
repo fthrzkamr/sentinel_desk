@@ -72,6 +72,12 @@ const routes = [
         component: () => import('@/views/history/HistoryView.vue'),
         meta: { permission: 'monitoring.view' },
       },
+      {
+        path: 'settings',
+        name: 'settings',
+        component: () => import('@/views/settings/SettingsView.vue'),
+        meta: { permission: 'settings.manage' },
+      },
     ],
   },
 ]

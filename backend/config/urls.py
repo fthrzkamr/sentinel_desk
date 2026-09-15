@@ -13,6 +13,7 @@ urlpatterns = [
     path("api/", include("apps.livescreen.urls")),
     path("api/", include("apps.alerts.urls")),
     path("api/", include("apps.audit.urls")),
+    path("api/", include("apps.system_settings.urls")),
 ]
 
 if settings.DEBUG:

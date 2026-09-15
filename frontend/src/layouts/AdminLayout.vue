@@ -22,7 +22,7 @@ const rawNavItems = [
   { label: 'Agents', to: '/agents', icon: 'cpu', permission: 'agent.manage', section: 'Manajemen' },
   { label: 'Users', to: '/users', icon: 'users', permission: 'user.manage', section: 'Manajemen' },
   { label: 'Audit Logs', to: '/audit-logs', icon: 'file-text', permission: 'audit.view', section: 'Sistem' },
-  { label: 'Settings', to: '/settings', icon: 'sliders', soon: true, section: 'Sistem' },
+  { label: 'Settings', to: '/settings', icon: 'sliders', permission: 'settings.manage', section: 'Sistem' },
 ]
 
 const navItems = computed(() =>

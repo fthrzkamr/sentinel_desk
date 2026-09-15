@@ -152,6 +152,7 @@ def test_metrics_latest_and_history(admin_client, enrolled_device):
         (10, 10, 10, 5, True, "ONLINE"),  # low battery but charging is not critical
     ],
 )
+@pytest.mark.django_db
 def test_evaluate_status_thresholds(cpu, ram, disk, battery, charging, expected):
     result = evaluate_status(
         cpu_percent=cpu, ram_percent=ram, disk_percent=disk, battery_percent=battery, battery_charging=charging

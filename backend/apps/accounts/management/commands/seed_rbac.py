@@ -16,6 +16,7 @@ PERMISSIONS = [
     ("agent.manage", "Manage enrollment tokens and agent versions"),
     ("audit.view", "View audit logs"),
     ("user.manage", "Manage users, roles and permissions"),
+    ("settings.manage", "Tune system thresholds (CPU/RAM/Disk/Battery, offline detection, retention)"),
 ]
 
 ROLE_PERMISSIONS = {

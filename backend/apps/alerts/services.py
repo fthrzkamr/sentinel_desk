@@ -1,14 +1,15 @@
-from django.conf import settings
 from django.utils import timezone
+
+from apps.system_settings.models import SystemSettings
 
 from .models import Alert
 
 _OPEN_STATUSES = [Alert.Status.OPEN, Alert.Status.ACKNOWLEDGED]
 
 _METRIC_CHECKS = [
-    (Alert.Category.CPU, "cpu_percent", "CPU_WARNING_PERCENT", "CPU_CRITICAL_PERCENT", "CPU usage"),
-    (Alert.Category.RAM, "ram_percent", "RAM_WARNING_PERCENT", "RAM_CRITICAL_PERCENT", "RAM usage"),
-    (Alert.Category.DISK, "disk_percent", "DISK_WARNING_PERCENT", "DISK_CRITICAL_PERCENT", "Disk usage"),
+    (Alert.Category.CPU, "cpu_percent", "cpu_warning_percent", "cpu_critical_percent", "CPU usage"),
+    (Alert.Category.RAM, "ram_percent", "ram_warning_percent", "ram_critical_percent", "RAM usage"),
+    (Alert.Category.DISK, "disk_percent", "disk_warning_percent", "disk_critical_percent", "Disk usage"),
 ]
 
 
@@ -52,6 +53,7 @@ def sync_metric_alerts(device, *, cpu_percent, ram_percent, disk_percent, batter
     exactly which metric tripped, and clears the moment that specific metric
     is back under its warning threshold. Returns (triggered, resolved) lists."""
 
+    config = SystemSettings.get_solo()
     values = {"cpu_percent": cpu_percent, "ram_percent": ram_percent, "disk_percent": disk_percent}
     triggered, resolved = [], []
 
@@ -59,8 +61,8 @@ def sync_metric_alerts(device, *, cpu_percent, ram_percent, disk_percent, batter
         value = values[field]
         if value is None:
             continue
-        warn_th = getattr(settings, warn_setting)
-        crit_th = getattr(settings, crit_setting)
+        warn_th = getattr(config, warn_setting)
+        crit_th = getattr(config, crit_setting)
 
         if value >= crit_th:
             alert, created = _trigger(
@@ -87,13 +89,13 @@ def sync_metric_alerts(device, *, cpu_percent, ram_percent, disk_percent, batter
             if resolved_alert:
                 resolved.append(resolved_alert)
 
-    if battery_percent is not None and battery_charging is False and battery_percent <= settings.BATTERY_CRITICAL_PERCENT:
+    if battery_percent is not None and battery_charging is False and battery_percent <= config.battery_critical_percent:
         alert, created = _trigger(
             device,
             Alert.Category.BATTERY,
             Alert.Severity.CRITICAL,
             f"Battery at {battery_percent:.0f}% and not charging",
-            {"value": battery_percent, "threshold": settings.BATTERY_CRITICAL_PERCENT},
+            {"value": battery_percent, "threshold": config.battery_critical_percent},
         )
         if created:
             triggered.append(alert)

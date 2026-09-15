@@ -1,11 +1,11 @@
 import logging
 
 from celery import shared_task
-from django.conf import settings
 from django.utils import timezone
 
 from apps.alerts.services import trigger_connectivity_alert
 from apps.devices.models import Device
+from apps.system_settings.models import SystemSettings
 
 from .broadcast import broadcast_dashboard_event
 from .models import DeviceMetric
@@ -19,7 +19,7 @@ def mark_stale_devices_offline():
     its last heartbeat/metric is older than DEVICE_OFFLINE_THRESHOLD_SECONDS —
     this is the only place that transitions a device TO offline."""
 
-    cutoff = timezone.now() - timezone.timedelta(seconds=settings.DEVICE_OFFLINE_THRESHOLD_SECONDS)
+    cutoff = timezone.now() - timezone.timedelta(seconds=SystemSettings.get_solo().device_offline_threshold_seconds)
     stale_devices = Device.objects.filter(last_seen__lt=cutoff).exclude(
         status__in=[Device.Status.OFFLINE, Device.Status.DISABLED]
     )
@@ -53,7 +53,7 @@ def mark_stale_devices_offline():
 
 @shared_task
 def prune_old_metrics():
-    cutoff = timezone.now() - timezone.timedelta(days=settings.DEVICE_METRIC_RETENTION_DAYS)
+    cutoff = timezone.now() - timezone.timedelta(days=SystemSettings.get_solo().device_metric_retention_days)
     deleted, _ = DeviceMetric.objects.filter(recorded_at__lt=cutoff).delete()
     if deleted:
         logger.info("Pruned %s old metric row(s)", deleted)

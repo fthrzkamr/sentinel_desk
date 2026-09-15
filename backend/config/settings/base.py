@@ -43,6 +43,7 @@ LOCAL_APPS = [
     "apps.software",
     "apps.alerts",
     "apps.audit",
+    "apps.system_settings",
     "apps.livescreen",
 ]
 
@@ -112,6 +113,22 @@ CHANNEL_LAYERS = {
         "CONFIG": {
             "hosts": [REDIS_URL],
         },
+    },
+}
+
+# Without this, Django silently falls back to LocMemCache (per-process, not
+# shared) — several things already assume a real shared cache: livescreen's
+# presence tracking (apps/livescreen/presence.py, needs every Daphne worker
+# to see the same agent/admin pairing), DRF's rate-limit throttle counters,
+# and SystemSettings' cache (apps/settings). All three only happened to work
+# in dev because Daphne runs as a single process there — this breaks the
+# moment there's more than one worker/replica. Django's built-in Redis
+# backend needs no extra package beyond `redis` (already a dependency).
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+        "KEY_PREFIX": "sentineldesk",
     },
 }
 

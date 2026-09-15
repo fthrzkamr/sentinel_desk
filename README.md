@@ -531,6 +531,54 @@ tab Metrics Device Detail.
   tergambar benar, hover tooltip presisi menunjuk sampel terdekat, toggle
   tabel bekerja, device test dibersihkan setelahnya.
 
+## Pengembangan tambahan (pasca-roadmap): Settings page + threshold via UI
+
+Sebelumnya CPU_WARNING_PERCENT dkk. cuma bisa diubah lewat edit `.env` +
+restart container — padahal ini nilai yang wajar di-tuning admin
+sewaktu-waktu. Sekarang bisa langsung dari UI, berlaku seketika.
+
+- Model baru `SystemSettings` (`apps/system_settings`, pola "solo"/singleton
+  — selalu satu baris, pk=1) menampung threshold yang tadinya cuma ada di
+  env var: CPU/RAM/Disk warning+critical, battery critical, ambang device
+  dianggap offline (detik), dan retensi histori metric (hari). Baris
+  pertama otomatis dibuat dari nilai default env yang sama seperti
+  sebelumnya — jadi tidak ada perubahan perilaku sampai memang diubah
+  lewat halaman ini.
+- Empat titik yang tadinya baca `django.conf.settings.CPU_WARNING_PERCENT`
+  dkk. langsung (`monitoring/services.py`, `monitoring/tasks.py`,
+  `alerts/services.py`) sekarang baca `SystemSettings.get_solo()` — di-cache
+  5 menit (lihat poin Redis di bawah) supaya tidak query DB di setiap
+  metric masuk, tapi tetap "sinkron" karena cache-nya di-invalidasi setiap
+  kali admin menyimpan perubahan.
+- **Bug nyata ditemukan saat membangun fitur ini**: Django cache ternyata
+  **tidak pernah benar-benar dikonfigurasi** (`CACHES` tidak ada sama sekali
+  di `settings/base.py`), padahal `apps/livescreen/presence.py` sudah lama
+  menulis di docstring-nya "Backed by Django's cache (Redis)". Tanpa
+  `CACHES`, Django diam-diam pakai `LocMemCache` bawaan (per-proses, tidak
+  dibagi antar worker) — kebetulan "jalan" di dev karena Daphne di sini
+  cuma 1 proses, tapi bakal diam-diam rusak (presence live-screen dan
+  counter rate-limit DRF jadi tidak konsisten antar proses) begitu ada
+  lebih dari satu worker/replica backend. Diperbaiki dengan menambahkan
+  `CACHES` yang benar-benar memakai Redis (`django.core.cache.backends.redis.RedisCache`
+  bawaan Django, tidak perlu package tambahan karena `redis` sudah jadi
+  dependency).
+  `GET/PATCH /api/settings/`, permission baru `settings.manage` (default:
+  `SUPER_ADMIN` dan `IT_ADMIN`), validasi warning harus lebih kecil dari
+  critical per metrik, percent dibatasi 0-100, ambang offline minimal 10
+  detik. Setiap perubahan tercatat di audit log (`settings.updated`).
+- **Halaman Settings** (`/settings`, sebelumnya "Soon") — form per kategori
+  (CPU/RAM/Disk/Baterai/Retensi), validasi per-field ditampilkan langsung
+  di bawah input yang salah, modal sukses auto-dismiss, timestamp
+  "terakhir diubah".
+- Diuji end-to-end lewat browser sungguhan: ubah threshold ke nilai tidak
+  valid (warning > critical) → muncul pesan error yang tepat di field yang
+  salah; ubah ke nilai valid → tersimpan, modal sukses muncul, reload
+  halaman membuktikan nilainya benar-benar persisten (bukan cuma state
+  lokal). Diverifikasi juga lewat pytest bahwa `evaluate_status()` langsung
+  memakai nilai baru tanpa restart apa pun. 6 pytest baru — total 77 test,
+  semua passed. Nilai yang sempat diubah untuk testing dikembalikan ke
+  default semula setelahnya.
+
 ## Testing cepat (manual)
 
 ```bash
