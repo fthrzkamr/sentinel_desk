@@ -8,11 +8,16 @@ from .models import Device, DeviceCredential
 class DeviceUser:
     """Stand-in for request.user on agent-authenticated requests. Not a real
     Django user — agents authenticate with a per-device token, never a user
-    account or password."""
+    account or password. `pk` is set to the authenticated device's own pk —
+    DRF's throttle classes key their rate-limit bucket on `request.user.pk`,
+    so leaving this as a shared constant (e.g. None) would put every device
+    in the fleet into one single shared bucket instead of one each."""
 
     is_authenticated = True
     is_anonymous = False
-    pk = None
+
+    def __init__(self, device):
+        self.pk = device.pk
 
     def __str__(self):
         return "device"
@@ -53,7 +58,7 @@ class DeviceTokenAuthentication(BaseAuthentication):
             raise AuthenticationFailed("Invalid device token.")
 
         credential.touch()
-        return (DeviceUser(), device)
+        return (DeviceUser(device), device)
 
     def authenticate_header(self, request):
         return self.keyword

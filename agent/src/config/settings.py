@@ -1,10 +1,24 @@
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-AGENT_DIR = Path(__file__).resolve().parent.parent.parent
+
+def _get_agent_dir() -> Path:
+    """Directory the agent's own files (.env, credentials.dat, logs/) live
+    next to. Once PyInstaller freezes this into a onefile .exe, `__file__`
+    resolves inside the temporary per-run extraction folder (sys._MEIPASS)
+    instead of anywhere stable — credentials saved there would vanish the
+    moment the process exits. `sys.executable` is the actual .exe path in
+    that case, so persistent state has to be anchored there instead."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent.parent
+
+
+AGENT_DIR = _get_agent_dir()
 load_dotenv(AGENT_DIR / ".env")
 
 CREDENTIALS_PATH = AGENT_DIR / "credentials.dat"

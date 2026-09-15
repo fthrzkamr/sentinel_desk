@@ -1,0 +1,5 @@
+# Build-only tooling — not needed at runtime, so it's kept out of
+# requirements.txt (which is what the shipped .exe's dependencies come
+# from). Install this in the same venv only when building the .exe:
+#   pip install -r requirements-build.txt
+pyinstaller==6.22.3

@@ -3,10 +3,12 @@
 IT Endpoint Monitoring & Device Management — Admin Web Dashboard, Backend API,
 dan Client Agent untuk perangkat Windows yang terdaftar dan diotorisasi.
 
-Status saat ini: **Phase 1-7** selesai dan teruji (setup & auth, device
-registration & agent, realtime monitoring via WebSocket, software inventory,
-location monitoring, live screen via WebRTC, alerts, audit log, RBAC penuh).
-Lihat `docs/roadmap.md` untuk seluruh tahapan berikutnya.
+Status saat ini: **Phase 1-8 (semua phase) selesai dan teruji** — setup &
+auth, device registration & agent, realtime monitoring via WebSocket,
+software inventory, location monitoring, live screen via WebRTC, alerts,
+audit log, RBAC penuh, security hardening, CI, production deployment stack,
+dan Agent yang sudah bisa dikemas jadi `.exe`. Lihat `docs/roadmap.md` untuk
+rincian tiap phase.
 
 ## Struktur Proyek
 
@@ -160,6 +162,41 @@ docker compose exec backend celery -A config beat -l info
 
 Tanpa proses ini, device yang agent-nya dimatikan akan tetap tampil status
 terakhirnya (mis. ONLINE) sampai worker+beat berjalan dan menandainya OFFLINE.
+
+## 6. Deployment (production)
+
+`docker-compose.prod.yml` adalah stack production generik — belum di-deploy
+ke server sungguhan mana pun (belum ada domain/server tujuan), tapi sudah
+diuji jalan penuh di komputer ini. Bedanya dari dev:
+
+- Backend jalan dari `backend/Dockerfile.prod` (`requirements/prod.txt`
+  saja, Daphne bukan `runserver`, kode di-`COPY` sekali ke image — bukan
+  bind-mount, jadi tidak hot-reload, harus rebuild tiap ada perubahan kode).
+- Frontend di-build jadi static file (`npm run build`) lalu di-serve nginx
+  (`frontend/Dockerfile.prod`), bukan Vite dev server.
+- Satu `nginx` di depan semuanya (`nginx/conf.d/default.conf`) — port 80
+  saja yang dibuka ke host; postgres/redis/backend/frontend tidak bisa
+  diakses langsung dari luar.
+
+```bash
+cp .env.prod.example .env.prod
+# isi DJANGO_SECRET_KEY, POSTGRES_PASSWORD, domain asli, dst.
+
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+```
+
+`--env-file .env.prod` **wajib** — tanpa itu, `${POSTGRES_DB}` dkk. di
+`docker-compose.prod.yml` tidak ke-resolve dan postgres gagal start (ini
+mekanisme substitusi variabel compose sendiri, terpisah dari `env_file:`
+yang meng-inject env ke dalam container).
+
+TLS belum dikonfigurasi (`nginx/conf.d/default.conf` baru dengar di port 80
+plain HTTP) karena belum ada domain/sertifikat sungguhan — begitu ada,
+tambahkan server block 443 di file itu dengan sertifikatnya, lalu set
+`DJANGO_HTTPS_ENABLED=true` di `.env.prod` supaya Django ikut mengaktifkan
+`SECURE_SSL_REDIRECT`/HSTS/cookie secure (lihat komentar di
+`config/settings/production.py` — mengaktifkannya sebelum TLS benar-benar
+ada di nginx malah bikin redirect loop, bukan lebih aman).
 
 ## Apa yang sudah berfungsi di Phase 1
 
@@ -454,6 +491,19 @@ layarnya sendiri — tidak ada mode diam-diam.
   tercatat benar di halaman Audit Logs.
 - 22 pytest baru (10 alerts, 4 audit, 8 user-management) — total 71 test,
   semua passed.
+
+## Apa yang sudah berfungsi di Phase 8 (security hardening, testing, deployment, packaging)
+
+- **Git & CI**: repo di-`git init` untuk pertama kalinya (belum pernah jadi git repo sebelum ini), commit awal berisi seluruh Phase 1-7. `.github/workflows/ci.yml` — dua job: `backend-tests` (Postgres+Redis service container, jalankan `pytest`) dan `frontend-build` (`npm ci && npm run build`), jalan otomatis begitu repo ini di-push ke GitHub/GitLab.
+- **Bug nyata ditemukan & diperbaiki saat audit rate-limiting**: `DeviceUser` (stand-in `request.user` untuk request yang diautentikasi device token) selama ini punya `pk = None` yang sama untuk **semua** device — akibatnya DRF throttle (yang nge-key rate limit berdasarkan `request.user.pk`) menganggap seluruh device di fleet berbagi **satu** kuota rate-limit bersama, bukan satu kuota per device. Diperbaiki dengan mengisi `pk` dari device yang sebenarnya. Juga ditambahkan `UserRateThrottle` (300/min) sebagai baseline untuk endpoint yang belum punya `throttle_scope` sendiri (Alerts, Users, Audit Logs) — sebelumnya endpoint-endpoint itu sama sekali tidak dibatasi.
+- `python manage.py check --deploy` sudah bersih di `config.settings.production` (satu-satunya warning hanya muncul kalau memang sengaja dites pakai secret key lemah).
+- **`config/settings/production.py`** diperkuat: WhiteNoise (serve static Django admin langsung dari Daphne, tanpa volume statis terpisah), `CSRF_TRUSTED_ORIGINS`, `SECURE_PROXY_SSL_HEADER` (perlu karena TLS nanti terminasi di nginx, bukan di Daphne), dan flag `DJANGO_HTTPS_ENABLED` — sengaja default `false` karena nginx yang disiapkan belum punya sertifikat TLS sungguhan (belum ada domain produksi); mengaktifkan `SECURE_SSL_REDIRECT` tanpa TLS asli justru bikin redirect loop, bukan lebih aman. Sentry (`sentry-sdk`, sudah lama ada di `requirements/prod.txt` tapi belum pernah dipakai) sekarang benar-benar diinisialisasi, tapi no-op sampai `SENTRY_DSN` diisi.
+- **Docker production, generik** (belum di-deploy ke server sungguhan — belum ada server tujuan): `backend/Dockerfile.prod` (hanya `requirements/prod.txt`, tanpa debug_toolbar/pytest/dst., jalankan `daphne` bukan `runserver`), `frontend/Dockerfile.prod` (multi-stage: build Vite lalu di-serve nginx), `nginx/conf.d/default.conf` (satu pintu masuk port 80: `/api`, `/admin`, `/static` ke backend, `/ws` ke backend dengan header upgrade yang benar untuk WebSocket, sisanya ke frontend), `docker-compose.prod.yml` (postgres/redis tanpa port ke host, image di-build sekali/immutable, tanpa bind-mount source). Frontend sekarang fallback ke path relatif (`/api`, dan `ws(s)://<host saat ini>/ws`) kalau env var Vite tidak di-set — supaya build produksi otomatis ikut domain apa pun tanpa perlu di-hardcode saat build.
+- Diuji sungguhan di komputer ini (bukan cuma baca konfigurasi): seluruh stack production (5 container: postgres, redis, backend, frontend, nginx) di-build dan dijalankan di project Docker terpisah supaya tidak bentrok dengan stack dev yang sedang berjalan, lalu diverifikasi lewat request asli — halaman React ke-serve, login JWT lewat `/api/` berhasil, Django admin + static file (WhiteNoise) ke-serve dengan benar, dan WebSocket `/ws/dashboard/` berhasil upgrade lewat nginx sampai ke Daphne. Semua container & image test dibersihkan setelahnya.
+- **Agent dikemas jadi `.exe`** (`agent/SentinelDeskAgent.spec`, PyInstaller, `agent/requirements-build.txt` terpisah dari runtime deps): satu file `.exe`, tanpa jendela console, semua dependency native (winsdk, aiortc, av/PyAV, tkinter) berhasil ter-bundle di percobaan build pertama. Ditemukan & diperbaiki bug nyata sebelum build: `AGENT_DIR`/`LOG_DIR` sebelumnya dihitung dari `__file__`, yang begitu di-freeze PyInstaller malah mengarah ke folder ekstraksi sementara — `.env`/`credentials.dat` akan "hilang" tiap proses berhenti. Diperbaiki supaya memakai lokasi `.exe` yang sebenarnya (`sys.executable`) saat frozen.
+- **Auto-start saat login** (`agent/src/services/autostart.py`) — `.exe` mendaftarkan dirinya ke `HKCU\...\Run` (registry per-user, tanpa perlu admin) setiap kali berhasil jalan, jadi otomatis benar lagi kalau lokasi file berubah. `--uninstall-autostart` untuk melepas pendaftaran.
+- Diuji dengan `.exe` sungguhan (bukan cuma `python src/main.py`): dijalankan langsung dari `dist/SentinelDeskAgent.exe`, berhasil enroll device asli, key registry auto-start beneran muncul dan menunjuk ke path exe yang benar, dan setelah restart backend (menemukan bug `DeviceUser` di atas lewat testing ini juga) metrics loop berjalan stabil beberapa siklus berturut-turut. Device test, kredensial, dan key registry dibersihkan setelahnya.
+- Ketemu satu kuirk operasional (bukan bug aplikasi): Django `runserver` di dalam container dev sesekali tidak auto-reload saat file di-edit lewat bind mount di Docker Desktop/Windows (kelas masalah yang sama dengan kenapa Vite butuh `usePolling` — lihat Phase Docker) — kalau perubahan kode tidak kelihatan efeknya, `docker compose restart backend` menyelesaikannya.
 
 ## Testing cepat (manual)
 

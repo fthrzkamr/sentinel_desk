@@ -1,0 +1,35 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DJANGO_SETTINGS_MODULE=config.settings.production
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpq-dev gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Only prod.txt — no debug_toolbar/pytest/black/flake8 in the image that
+# actually gets deployed.
+COPY requirements/ requirements/
+RUN pip install --no-cache-dir -r requirements/prod.txt
+
+COPY . .
+
+# collectstatic only reads STATIC_ROOT/STATICFILES_DIRS, but importing
+# settings still evaluates every required env() call — these placeholders
+# exist purely to satisfy that at build time and are overridden by the real
+# values docker-compose injects at container runtime.
+RUN DJANGO_SECRET_KEY=build-time-placeholder \
+    DATABASE_URL=postgres://placeholder:placeholder@localhost:5432/placeholder \
+    DJANGO_ALLOWED_HOSTS=localhost \
+    CORS_ALLOWED_ORIGINS=http://localhost \
+    python manage.py collectstatic --noinput
+
+EXPOSE 8000
+
+# Daphne, not gunicorn: this app is ASGI end-to-end (Channels WebSocket
+# consumers for the dashboard and live screen), so the production server
+# needs to speak both HTTP and WebSocket, not just WSGI.
+CMD ["sh", "-c", "python manage.py migrate --noinput && daphne -b 0.0.0.0 -p 8000 config.asgi:application"]

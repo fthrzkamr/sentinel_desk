@@ -149,10 +149,16 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 25,
     "DEFAULT_THROTTLE_CLASSES": (
         "rest_framework.throttling.ScopedRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
     ),
     "DEFAULT_THROTTLE_RATES": {
         "auth": "10/min",
         "agent": "120/min",
+        # Baseline ceiling for every authenticated endpoint that doesn't
+        # declare its own throttle_scope (Alerts, Users, Audit Logs, etc.) —
+        # ScopedRateThrottle silently skips any view without a scope, so
+        # without this those endpoints had no rate limit at all.
+        "user": "300/min",
     },
     "DATETIME_FORMAT": "iso-8601",
 }

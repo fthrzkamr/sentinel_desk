@@ -1,4 +1,10 @@
 -r base.txt
+# Daphne (already in base.txt) is what Dockerfile.prod actually runs — it's
+# already a Channels dependency and speaks ASGI end-to-end, which this app
+# needs everywhere (dashboard + live-screen WebSockets), not just on select
+# routes. gunicorn+uvicorn are kept available as a drop-in alternative
+# (`gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker`) for
+# anyone who'd rather run it that way instead of changing Dockerfile.prod.
 gunicorn==23.0.0
 uvicorn[standard]==0.30.6
 whitenoise==6.7.0

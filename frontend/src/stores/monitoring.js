@@ -3,7 +3,11 @@ import { defineStore } from 'pinia'
 import { getAlertSummary } from '@/services/alerts'
 import { useAuthStore } from '@/stores/auth'
 
-const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000/ws'
+// Same-origin fallback for production (one edge nginx, whatever its domain
+// is) — WebSocket needs a full scheme+host unlike a relative fetch/axios
+// URL, so it's built from the page's own location instead of hardcoded.
+const WS_BASE_URL =
+  import.meta.env.VITE_WS_BASE_URL || `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`
 const RECONNECT_DELAY_MS = 3000
 
 export const useMonitoringStore = defineStore('monitoring', {

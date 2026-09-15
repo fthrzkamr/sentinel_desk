@@ -3,15 +3,15 @@ import os
 import signal
 import sys
 import time
-from pathlib import Path
 
-from config.settings import AgentConfig
+from config.settings import AGENT_DIR, AgentConfig
 from monitoring.location import get_os_location
 from monitoring.metrics import MetricsCollector
 from monitoring.software_inventory import gather_installed_software
 from monitoring.system_info import gather_system_info
 from networking.client import EnrollmentError, enroll, send_location, send_metrics, send_software_sync
 from screen.signaling_client import LiveScreenAgent
+from services import autostart
 from services.secure_storage import load_credentials, save_credentials
 
 AGENT_VERSION = "0.1.0-dev"
@@ -19,7 +19,7 @@ MAX_BACKOFF_SECONDS = 300
 SOFTWARE_SYNC_INTERVAL_SECONDS = 3600  # software list changes rarely — no need to resend every cycle
 LOCATION_SYNC_INTERVAL_SECONDS = 900  # 15 min — frequent enough to track a moving laptop, not spammy
 
-LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+LOG_DIR = AGENT_DIR / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
 logging.basicConfig(
@@ -82,6 +82,8 @@ def run():
     except EnrollmentError as exc:
         logger.error("Could not enroll this device: %s", exc)
         sys.exit(1)
+
+    autostart.install()
 
     device_id = credentials["device_id"]
     device_token = credentials["device_token"]
@@ -153,4 +155,7 @@ def run():
 
 
 if __name__ == "__main__":
+    if "--uninstall-autostart" in sys.argv:
+        autostart.uninstall()
+        sys.exit(0)
     run()

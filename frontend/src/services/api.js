@@ -1,6 +1,10 @@
 import axios from 'axios'
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
+// Falls back to a same-origin relative path — correct in production where
+// one edge nginx serves the frontend and proxies /api to the backend on the
+// same domain, whatever that domain ends up being. Local dev always sets
+// VITE_API_BASE_URL explicitly (frontend and backend run on different ports).
+const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
 
 const api = axios.create({ baseURL })
 

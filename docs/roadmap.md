@@ -9,7 +9,7 @@
 | 5 | Location monitoring, history, Map | ✅ Selesai (Windows Location Service + fallback IP geolocation, peta Leaflet, riwayat) |
 | 6 | Live screen monitoring via WebRTC | ✅ Selesai (signaling relay per-device via Channels, RBAC + audit log wajib, satu viewer per device, overlay peringatan di layar device, kill-switch `SCREEN_MONITOR_ENABLED` di agent) |
 | 7 | Alerts, Audit log lengkap, RBAC penuh | ✅ Selesai (alert engine per-metrik dengan auto-resolve, halaman Alerts + notification bell, REST audit log dengan filter/search + halaman Audit Logs, CRUD user + assign role via UI) |
-| 8 | Security hardening, testing, deployment, packaging Agent .exe | ⬜ Belum |
+| 8 | Security hardening, testing, deployment, packaging Agent .exe | ✅ Selesai (git init + CI, throttle & production settings hardening, docker-compose.prod.yml + nginx generik, Agent .exe via PyInstaller + auto-start) |
 
 Prinsip: setiap phase harus stabil & teruji sebelum lanjut ke phase berikutnya.
 Lihat percakapan awal proyek untuk arsitektur final, ERD, dan alur komunikasi
