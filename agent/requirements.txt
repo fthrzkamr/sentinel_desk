@@ -1,0 +1,10 @@
+requests==2.32.3
+python-dotenv==1.0.1
+psutil==6.0.0
+pywin32==306; sys_platform == "win32"
+winsdk==1.0.0b10; sys_platform == "win32"
+aiortc==1.15.0
+mss==10.2.0
+websockets==17.1
+numpy==2.4.6
+Pillow==12.3.0

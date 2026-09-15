@@ -1,0 +1,34 @@
+# Env / secrets
+.env
+*.env
+!.env.example
+
+# Python
+backend/venv/
+__pycache__/
+*.pyc
+backend/staticfiles/
+backend/media/
+*.sqlite3
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# Agent
+agent/build/
+agent/dist/
+agent/*.spec.bak
+agent/venv/
+agent/credentials.dat
+agent/logs/
+agent/.env
+
+# Docker
+postgres_data/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
