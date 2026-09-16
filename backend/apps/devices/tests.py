@@ -303,3 +303,61 @@ def test_enrollment_token_without_org_assignment_leaves_device_unassigned(admin_
     device = Device.objects.get(device_id=enroll_response.data["device_id"])
     assert device.company_id is None
     assert device.branch_id is None
+
+
+@pytest.mark.django_db
+def test_device_view_only_role_cannot_edit_org_assignment(admin_user, enrollment_token, org_tree):
+    company, branch, department, employee = org_tree
+    _, raw_token = enrollment_token
+    enroll_resp = APIClient().post("/api/agent/enroll/", {"token": raw_token, "hostname": "LAPTOP-EDIT"}, format="json")
+    device_id = enroll_resp.data["device_id"]
+
+    view_only_role = Role.objects.create(name="VIEW_ONLY_TEST")
+    view_only_role.permissions.set([Permission.objects.get_or_create(code="device.view")[0]])
+    User.objects.create_user(
+        username="viewonly", email="viewonly@example.com", password="StrongPass123!", role=view_only_role
+    )
+    client = _client_for("viewonly")
+
+    get_response = client.get(f"/api/devices/{device_id}/")
+    assert get_response.status_code == 200
+
+    patch_response = client.patch(f"/api/devices/{device_id}/", {"company": company.id}, format="json")
+    assert patch_response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_device_manage_role_can_edit_org_assignment(org_manager_user, enrollment_token, org_tree):
+    company, branch, department, employee = org_tree
+    _, raw_token = enrollment_token
+    enroll_resp = APIClient().post("/api/agent/enroll/", {"token": raw_token, "hostname": "LAPTOP-EDIT-2"}, format="json")
+    device_id = enroll_resp.data["device_id"]
+
+    client = _client_for("orgmanager")
+    response = client.patch(
+        f"/api/devices/{device_id}/",
+        {"company": company.id, "branch": branch.id, "department": department.id, "assigned_employee": employee.id},
+        format="json",
+    )
+    assert response.status_code == 200
+
+    device = Device.objects.get(device_id=device_id)
+    assert device.company_id == company.id
+    assert device.assigned_employee_id == employee.id
+    assert AuditLog.objects.filter(action="device.updated", user=org_manager_user).exists()
+
+
+@pytest.mark.django_db
+def test_device_org_assignment_can_be_cleared(org_manager_user, enrollment_token, org_tree):
+    company, branch, department, employee = org_tree
+    _, raw_token = enrollment_token
+    enroll_resp = APIClient().post("/api/agent/enroll/", {"token": raw_token, "hostname": "LAPTOP-EDIT-3"}, format="json")
+    device_id = enroll_resp.data["device_id"]
+
+    client = _client_for("orgmanager")
+    client.patch(f"/api/devices/{device_id}/", {"company": company.id}, format="json")
+
+    clear_response = client.patch(f"/api/devices/{device_id}/", {"company": None}, format="json")
+    assert clear_response.status_code == 200
+    device = Device.objects.get(device_id=device_id)
+    assert device.company_id is None

@@ -16,6 +16,7 @@ from .serializers import (
     BranchSerializer,
     CompanySerializer,
     DepartmentSerializer,
+    DeviceOrgAssignmentSerializer,
     DeviceSerializer,
     EmployeeSerializer,
     EnrollmentTokenCreateSerializer,
@@ -176,14 +177,37 @@ class DeviceListView(generics.ListAPIView):
     ).all()
 
 
-class DeviceDetailView(generics.RetrieveAPIView):
-    permission_classes = [IsAuthenticated, HasPermission("device.view")]
-    serializer_class = DeviceSerializer
+class DeviceDetailView(generics.RetrieveUpdateAPIView):
+    # Viewing needs only device.view (most roles have it); changing the
+    # org assignment is a device.manage action — narrower, matching the
+    # enrollment-token-time assignment path in AgentEnrollView above.
+    http_method_names = ["get", "patch", "head", "options"]
     lookup_field = "device_id"
     lookup_url_kwarg = "device_id"
     queryset = Device.objects.select_related(
         "company", "branch", "department", "assigned_employee"
     ).all()
+
+    def get_permissions(self):
+        code = "device.manage" if self.request.method == "PATCH" else "device.view"
+        return [IsAuthenticated(), HasPermission(code)()]
+
+    def get_serializer_class(self):
+        return DeviceOrgAssignmentSerializer if self.request.method == "PATCH" else DeviceSerializer
+
+    def update(self, request, *args, **kwargs):
+        device = self.get_object()
+        serializer = DeviceOrgAssignmentSerializer(device, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        log_action(
+            user=request.user,
+            action="device.updated",
+            device_id=device.device_id,
+            request=request,
+            metadata={"changed_fields": list(request.data.keys())},
+        )
+        return Response(DeviceSerializer(device).data)
 
 
 class DeviceDisableView(APIView):

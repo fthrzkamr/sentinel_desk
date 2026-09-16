@@ -8,6 +8,10 @@ export function getDevice(deviceId) {
   return api.get(`/devices/${deviceId}/`)
 }
 
+export function updateDeviceOrgAssignment(deviceId, payload) {
+  return api.patch(`/devices/${deviceId}/`, payload)
+}
+
 export function disableDevice(deviceId) {
   return api.post(`/devices/${deviceId}/disable/`)
 }

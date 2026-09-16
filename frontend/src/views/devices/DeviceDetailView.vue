@@ -8,9 +8,10 @@ import LiveScreenPanel from '@/components/LiveScreenPanel.vue'
 import MetricTrendChart from '@/components/MetricTrendChart.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import UsageBar from '@/components/UsageBar.vue'
-import { disableDevice, enableDevice, getDevice } from '@/services/devices'
+import { disableDevice, enableDevice, getDevice, updateDeviceOrgAssignment } from '@/services/devices'
 import { getDeviceLocationHistory } from '@/services/locations'
 import { getLatestMetric, getMetricHistory } from '@/services/monitoring'
+import { listBranches, listCompanies, listDepartments, listEmployees } from '@/services/organization'
 import { listSoftware } from '@/services/software'
 import { useAuthStore } from '@/stores/auth'
 import { useMonitoringStore } from '@/stores/monitoring'
@@ -80,6 +81,106 @@ async function fetchDevice() {
       error.response?.status === 404 ? 'Device tidak ditemukan.' : 'Gagal memuat detail device.'
   } finally {
     isLoading.value = false
+  }
+}
+
+// --- Edit org assignment (Company/Branch/Department/Karyawan) ---
+
+const isEditingOrg = ref(false)
+const isSavingOrg = ref(false)
+const orgErrorMessage = ref('')
+const orgForm = reactive({ company: '', branch: '', department: '', assigned_employee: '' })
+
+const orgCompanies = ref([])
+const orgBranches = ref([])
+const orgDepartments = ref([])
+const orgEmployees = ref([])
+
+// Deliberately @change-driven rather than watch()-driven: this form needs
+// to pre-fill from the device's existing assignment (see startEditOrg），
+// and a plain watch() on orgForm.company would also fire — and reset the
+// branch/department it's in the middle of pre-filling — the moment that
+// pre-fill itself assigns a company id. @change only fires on genuine user
+// interaction with the <select>, never on a programmatic value assignment,
+// which is exactly the distinction needed here.
+
+async function onOrgCompanyChange() {
+  orgForm.branch = ''
+  orgForm.department = ''
+  orgForm.assigned_employee = ''
+  orgBranches.value = []
+  orgDepartments.value = []
+  orgEmployees.value = []
+  if (!orgForm.company) return
+  const { data } = await listBranches({ company: orgForm.company, page_size: 200 })
+  orgBranches.value = data.results
+}
+
+async function onOrgBranchChange() {
+  orgForm.department = ''
+  orgForm.assigned_employee = ''
+  orgDepartments.value = []
+  orgEmployees.value = []
+  if (!orgForm.branch) return
+  const { data } = await listDepartments({ branch: orgForm.branch, page_size: 200 })
+  orgDepartments.value = data.results
+}
+
+async function onOrgDepartmentChange() {
+  orgForm.assigned_employee = ''
+  orgEmployees.value = []
+  if (!orgForm.department) return
+  const { data } = await listEmployees({ department: orgForm.department, page_size: 200 })
+  orgEmployees.value = data.results
+}
+
+async function startEditOrg() {
+  orgErrorMessage.value = ''
+  isEditingOrg.value = true
+  orgForm.company = device.value.company_id || ''
+  orgForm.branch = ''
+  orgForm.department = ''
+  orgForm.assigned_employee = ''
+  orgBranches.value = []
+  orgDepartments.value = []
+  orgEmployees.value = []
+
+  const { data } = await listCompanies({ page_size: 200 })
+  orgCompanies.value = data.results
+
+  if (orgForm.company) {
+    const branchRes = await listBranches({ company: orgForm.company, page_size: 200 })
+    orgBranches.value = branchRes.data.results
+    orgForm.branch = device.value.branch_id || ''
+  }
+  if (orgForm.branch) {
+    const deptRes = await listDepartments({ branch: orgForm.branch, page_size: 200 })
+    orgDepartments.value = deptRes.data.results
+    orgForm.department = device.value.department_id || ''
+  }
+  if (orgForm.department) {
+    const empRes = await listEmployees({ department: orgForm.department, page_size: 200 })
+    orgEmployees.value = empRes.data.results
+    orgForm.assigned_employee = device.value.assigned_employee_id || ''
+  }
+}
+
+async function saveOrgAssignment() {
+  isSavingOrg.value = true
+  orgErrorMessage.value = ''
+  try {
+    await updateDeviceOrgAssignment(device.value.device_id, {
+      company: orgForm.company || null,
+      branch: orgForm.branch || null,
+      department: orgForm.department || null,
+      assigned_employee: orgForm.assigned_employee || null,
+    })
+    await fetchDevice()
+    isEditingOrg.value = false
+  } catch (error) {
+    orgErrorMessage.value = error.response?.data?.detail || 'Gagal menyimpan assignment.'
+  } finally {
+    isSavingOrg.value = false
   }
 }
 
@@ -259,19 +360,104 @@ async function confirmToggle() {
         </div>
 
         <div class="p-6">
-          <div v-if="activeTab === 'overview'" class="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
-            <div><dt class="text-xs uppercase text-slate-400">Hostname</dt><dd>{{ device.hostname }}</dd></div>
-            <div><dt class="text-xs uppercase text-slate-400">Computer Name</dt><dd>{{ device.computer_name || '-' }}</dd></div>
-            <div><dt class="text-xs uppercase text-slate-400">Logged-in User</dt><dd>{{ device.username || '-' }}</dd></div>
-            <div><dt class="text-xs uppercase text-slate-400">IP Address</dt><dd>{{ device.ip_address || '-' }}</dd></div>
-            <div><dt class="text-xs uppercase text-slate-400">MAC Address</dt><dd>{{ device.mac_address || '-' }}</dd></div>
-            <div><dt class="text-xs uppercase text-slate-400">Agent Version</dt><dd>{{ device.agent_version || '-' }}</dd></div>
-            <div><dt class="text-xs uppercase text-slate-400">First Registered</dt><dd>{{ new Date(device.first_registered).toLocaleString() }}</dd></div>
-            <div><dt class="text-xs uppercase text-slate-400">Last Seen</dt><dd>{{ timeAgo(displayLastSeen) }}</dd></div>
-            <div><dt class="text-xs uppercase text-slate-400">Company</dt><dd>{{ device.company || 'Belum diatur' }}</dd></div>
-            <div><dt class="text-xs uppercase text-slate-400">Branch</dt><dd>{{ device.branch || 'Belum diatur' }}</dd></div>
-            <div><dt class="text-xs uppercase text-slate-400">Department</dt><dd>{{ device.department || 'Belum diatur' }}</dd></div>
-            <div><dt class="text-xs uppercase text-slate-400">Assigned Employee</dt><dd>{{ device.assigned_employee || 'Belum diatur' }}</dd></div>
+          <div v-if="activeTab === 'overview'" class="space-y-6">
+            <div class="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+              <div><dt class="text-xs uppercase text-slate-400">Hostname</dt><dd>{{ device.hostname }}</dd></div>
+              <div><dt class="text-xs uppercase text-slate-400">Computer Name</dt><dd>{{ device.computer_name || '-' }}</dd></div>
+              <div><dt class="text-xs uppercase text-slate-400">Logged-in User</dt><dd>{{ device.username || '-' }}</dd></div>
+              <div><dt class="text-xs uppercase text-slate-400">IP Address</dt><dd>{{ device.ip_address || '-' }}</dd></div>
+              <div><dt class="text-xs uppercase text-slate-400">MAC Address</dt><dd>{{ device.mac_address || '-' }}</dd></div>
+              <div><dt class="text-xs uppercase text-slate-400">Agent Version</dt><dd>{{ device.agent_version || '-' }}</dd></div>
+              <div><dt class="text-xs uppercase text-slate-400">First Registered</dt><dd>{{ new Date(device.first_registered).toLocaleString() }}</dd></div>
+              <div><dt class="text-xs uppercase text-slate-400">Last Seen</dt><dd>{{ timeAgo(displayLastSeen) }}</dd></div>
+            </div>
+
+            <div class="border-t border-slate-100 pt-5">
+              <div class="mb-3 flex items-center justify-between">
+                <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">Biodata Pengguna</h3>
+                <button
+                  v-if="auth.hasPermission('device.manage') && !isEditingOrg"
+                  class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  @click="startEditOrg"
+                >
+                  Edit
+                </button>
+              </div>
+
+              <div v-if="!isEditingOrg" class="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+                <div><dt class="text-xs uppercase text-slate-400">Company</dt><dd>{{ device.company || 'Belum diatur' }}</dd></div>
+                <div><dt class="text-xs uppercase text-slate-400">Branch</dt><dd>{{ device.branch || 'Belum diatur' }}</dd></div>
+                <div><dt class="text-xs uppercase text-slate-400">Department</dt><dd>{{ device.department || 'Belum diatur' }}</dd></div>
+                <div><dt class="text-xs uppercase text-slate-400">Assigned Employee</dt><dd>{{ device.assigned_employee || 'Belum diatur' }}</dd></div>
+              </div>
+
+              <div v-else class="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-4">
+                  <div>
+                    <label class="mb-1 block text-xs font-medium text-slate-600">Company</label>
+                    <select
+                      v-model="orgForm.company"
+                      class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                      @change="onOrgCompanyChange"
+                    >
+                      <option value="">Tidak diisi</option>
+                      <option v-for="c in orgCompanies" :key="c.id" :value="c.id">{{ c.name }}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-xs font-medium text-slate-600">Branch</label>
+                    <select
+                      v-model="orgForm.branch"
+                      :disabled="!orgForm.company"
+                      class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-100 disabled:text-slate-400"
+                      @change="onOrgBranchChange"
+                    >
+                      <option value="">Tidak diisi</option>
+                      <option v-for="b in orgBranches" :key="b.id" :value="b.id">{{ b.name }}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-xs font-medium text-slate-600">Department</label>
+                    <select
+                      v-model="orgForm.department"
+                      :disabled="!orgForm.branch"
+                      class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-100 disabled:text-slate-400"
+                      @change="onOrgDepartmentChange"
+                    >
+                      <option value="">Tidak diisi</option>
+                      <option v-for="d in orgDepartments" :key="d.id" :value="d.id">{{ d.name }}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-xs font-medium text-slate-600">Karyawan</label>
+                    <select
+                      v-model="orgForm.assigned_employee"
+                      :disabled="!orgForm.department"
+                      class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-100 disabled:text-slate-400"
+                    >
+                      <option value="">Tidak diisi</option>
+                      <option v-for="e in orgEmployees" :key="e.id" :value="e.id">{{ e.full_name }}</option>
+                    </select>
+                  </div>
+                </div>
+                <p v-if="orgErrorMessage" class="text-sm text-red-600">{{ orgErrorMessage }}</p>
+                <div class="flex justify-end gap-2">
+                  <button
+                    class="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-white"
+                    @click="isEditingOrg = false"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    :disabled="isSavingOrg"
+                    class="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+                    @click="saveOrgAssignment"
+                  >
+                    {{ isSavingOrg ? 'Menyimpan...' : 'Simpan' }}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div v-else-if="activeTab === 'hardware'" class="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">

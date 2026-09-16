@@ -42,6 +42,13 @@ class DeviceSerializer(serializers.ModelSerializer):
     branch = serializers.StringRelatedField()
     department = serializers.StringRelatedField()
     assigned_employee = serializers.StringRelatedField()
+    # Plain FK ids alongside the display strings above — the edit form
+    # needs these to pre-select the right option in each cascading dropdown,
+    # which a human-readable name alone can't do unambiguously.
+    company_id = serializers.IntegerField(read_only=True)
+    branch_id = serializers.IntegerField(read_only=True)
+    department_id = serializers.IntegerField(read_only=True)
+    assigned_employee_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Device
@@ -67,11 +74,30 @@ class DeviceSerializer(serializers.ModelSerializer):
             "last_seen",
             "first_registered",
             "company",
+            "company_id",
+            "branch_id",
+            "department_id",
+            "assigned_employee_id",
             "branch",
             "department",
             "assigned_employee",
         ]
         read_only_fields = fields
+
+
+class DeviceOrgAssignmentSerializer(serializers.ModelSerializer):
+    company = serializers.PrimaryKeyRelatedField(queryset=Company.objects.all(), required=False, allow_null=True)
+    branch = serializers.PrimaryKeyRelatedField(queryset=Branch.objects.all(), required=False, allow_null=True)
+    department = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.all(), required=False, allow_null=True
+    )
+    assigned_employee = serializers.PrimaryKeyRelatedField(
+        queryset=Employee.objects.all(), required=False, allow_null=True
+    )
+
+    class Meta:
+        model = Device
+        fields = ["company", "branch", "department", "assigned_employee"]
 
 
 class EnrollmentTokenSerializer(serializers.ModelSerializer):
