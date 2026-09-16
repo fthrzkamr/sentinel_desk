@@ -1,6 +1,40 @@
 from rest_framework import serializers
 
-from .models import Device, EnrollmentToken
+from .models import Branch, Company, Department, Device, Employee, EnrollmentToken
+
+
+class CompanySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Company
+        fields = ["id", "name", "created_at"]
+        read_only_fields = ["id", "created_at"]
+
+
+class BranchSerializer(serializers.ModelSerializer):
+    company_name = serializers.CharField(source="company.name", read_only=True)
+
+    class Meta:
+        model = Branch
+        fields = ["id", "company", "company_name", "name"]
+
+
+class DepartmentSerializer(serializers.ModelSerializer):
+    branch_label = serializers.CharField(source="branch.__str__", read_only=True)
+
+    class Meta:
+        model = Department
+        fields = ["id", "branch", "branch_label", "name"]
+
+
+class EmployeeSerializer(serializers.ModelSerializer):
+    department = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.all(), required=False, allow_null=True
+    )
+    department_label = serializers.CharField(source="department.__str__", read_only=True, default=None)
+
+    class Meta:
+        model = Employee
+        fields = ["id", "department", "department_label", "full_name", "email", "position"]
 
 
 class DeviceSerializer(serializers.ModelSerializer):
@@ -44,6 +78,10 @@ class EnrollmentTokenSerializer(serializers.ModelSerializer):
     created_by = serializers.StringRelatedField()
     used_by_device = serializers.SlugRelatedField(slug_field="device_id", read_only=True)
     is_valid = serializers.BooleanField(read_only=True)
+    company = serializers.StringRelatedField()
+    branch = serializers.StringRelatedField()
+    department = serializers.StringRelatedField()
+    assigned_employee = serializers.StringRelatedField()
 
     class Meta:
         model = EnrollmentToken
@@ -58,6 +96,10 @@ class EnrollmentTokenSerializer(serializers.ModelSerializer):
             "used_by_device",
             "revoked",
             "is_valid",
+            "company",
+            "branch",
+            "department",
+            "assigned_employee",
         ]
         read_only_fields = fields
 
@@ -65,6 +107,18 @@ class EnrollmentTokenSerializer(serializers.ModelSerializer):
 class EnrollmentTokenCreateSerializer(serializers.Serializer):
     label = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
     ttl_minutes = serializers.IntegerField(required=False, min_value=1, max_value=10080)
+    # All optional — copied onto the Device the moment it enrolls with this
+    # token (see AgentEnrollView), so the admin can pre-assign a laptop to
+    # its company/branch/department/employee right when generating the
+    # token instead of editing the device afterward.
+    company = serializers.PrimaryKeyRelatedField(queryset=Company.objects.all(), required=False, allow_null=True)
+    branch = serializers.PrimaryKeyRelatedField(queryset=Branch.objects.all(), required=False, allow_null=True)
+    department = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.all(), required=False, allow_null=True
+    )
+    assigned_employee = serializers.PrimaryKeyRelatedField(
+        queryset=Employee.objects.all(), required=False, allow_null=True
+    )
 
 
 class EnrollRequestSerializer(serializers.Serializer):

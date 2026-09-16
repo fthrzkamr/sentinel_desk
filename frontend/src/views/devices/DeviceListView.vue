@@ -176,11 +176,16 @@ async function confirmToggle() {
             <td class="px-4 py-3 text-slate-500">{{ timeAgo(lastSeen(device)) }}</td>
             <td class="px-4 py-3 text-right">
               <div class="flex justify-end gap-2">
-                <button class="text-brand-600 hover:underline" @click="goToDetail(device)">View</button>
+                <button
+                  class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  @click="goToDetail(device)"
+                >
+                  View
+                </button>
                 <button
                   v-if="auth.hasPermission('device.disable')"
-                  class="hover:underline"
-                  :class="displayStatus(device) === 'DISABLED' ? 'text-emerald-600' : 'text-red-600'"
+                  class="rounded-md px-2.5 py-1 text-xs font-medium text-white"
+                  :class="displayStatus(device) === 'DISABLED' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'"
                   @click="askToggleStatus(device)"
                 >
                   {{ displayStatus(device) === 'DISABLED' ? 'Enable' : 'Disable' }}

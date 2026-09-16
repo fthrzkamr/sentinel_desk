@@ -166,6 +166,24 @@ class EnrollmentToken(models.Model):
     )
     revoked = models.BooleanField(default=False)
 
+    # Chosen once, at token-creation time — the admin already knows which
+    # laptop this token is for and who it's going to, so it's copied onto
+    # the Device the moment it enrolls instead of needing a second manual
+    # assignment step afterward. All optional: a token with none of these
+    # set still enrolls a device fine, just without org metadata.
+    company = models.ForeignKey(
+        Company, on_delete=models.SET_NULL, null=True, blank=True, related_name="enrollment_tokens"
+    )
+    branch = models.ForeignKey(
+        Branch, on_delete=models.SET_NULL, null=True, blank=True, related_name="enrollment_tokens"
+    )
+    department = models.ForeignKey(
+        Department, on_delete=models.SET_NULL, null=True, blank=True, related_name="enrollment_tokens"
+    )
+    assigned_employee = models.ForeignKey(
+        Employee, on_delete=models.SET_NULL, null=True, blank=True, related_name="enrollment_tokens"
+    )
+
     class Meta:
         ordering = ["-created_at"]
 
@@ -181,7 +199,17 @@ class EnrollmentToken(models.Model):
         return secrets.token_urlsafe(32)
 
     @classmethod
-    def create_with_token(cls, *, created_by, ttl_minutes: int, label: str = ""):
+    def create_with_token(
+        cls,
+        *,
+        created_by,
+        ttl_minutes: int,
+        label: str = "",
+        company=None,
+        branch=None,
+        department=None,
+        assigned_employee=None,
+    ):
         raw_token = cls.generate_raw_token()
         token = cls.objects.create(
             token_hash=make_password(raw_token),
@@ -189,6 +217,10 @@ class EnrollmentToken(models.Model):
             label=label,
             created_by=created_by,
             expires_at=timezone.now() + timezone.timedelta(minutes=ttl_minutes),
+            company=company,
+            branch=branch,
+            department=department,
+            assigned_employee=assigned_employee,
         )
         return token, raw_token
 

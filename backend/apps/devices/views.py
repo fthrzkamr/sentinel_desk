@@ -11,9 +11,13 @@ from apps.accounts.permissions import HasPermission
 from apps.audit.services import get_client_ip, log_action
 
 from .authentication import DeviceTokenAuthentication, IsDevice
-from .models import Device, DeviceCredential, EnrollmentToken
+from .models import Branch, Company, Department, Device, DeviceCredential, Employee, EnrollmentToken
 from .serializers import (
+    BranchSerializer,
+    CompanySerializer,
+    DepartmentSerializer,
     DeviceSerializer,
+    EmployeeSerializer,
     EnrollmentTokenCreateSerializer,
     EnrollmentTokenSerializer,
     EnrollRequestSerializer,
@@ -37,6 +41,10 @@ class EnrollmentTokenListCreateView(generics.ListCreateAPIView):
             created_by=request.user,
             ttl_minutes=ttl_minutes,
             label=input_serializer.validated_data.get("label", ""),
+            company=input_serializer.validated_data.get("company"),
+            branch=input_serializer.validated_data.get("branch"),
+            department=input_serializer.validated_data.get("department"),
+            assigned_employee=input_serializer.validated_data.get("assigned_employee"),
         )
 
         log_action(
@@ -104,7 +112,14 @@ class AgentEnrollView(APIView):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        device = Device.objects.create(ip_address=get_client_ip(request), **data)
+        device = Device.objects.create(
+            ip_address=get_client_ip(request),
+            company=matched_token.company,
+            branch=matched_token.branch,
+            department=matched_token.department,
+            assigned_employee=matched_token.assigned_employee,
+            **data,
+        )
         matched_token.mark_used(device)
         credential, raw_device_token = DeviceCredential.create_for_device(device)
 
@@ -203,3 +218,64 @@ class DeviceEnableView(APIView):
             user=request.user, action="device.enabled", device_id=device.device_id, request=request
         )
         return Response(DeviceSerializer(device).data)
+
+
+# --- Org structure (Company/Branch/Department/Employee) ---
+# Reference data an admin sets up once, then picks from when creating an
+# enrollment token (see EnrollmentTokenListCreateView.create above) so a
+# device is assigned the moment it enrolls rather than needing a separate
+# edit afterward.
+
+
+class CompanyListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated, HasPermission("device.manage")]
+    queryset = Company.objects.all()
+    serializer_class = CompanySerializer
+
+
+class CompanyDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAuthenticated, HasPermission("device.manage")]
+    queryset = Company.objects.all()
+    serializer_class = CompanySerializer
+
+
+class BranchListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated, HasPermission("device.manage")]
+    serializer_class = BranchSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["company"]
+    queryset = Branch.objects.select_related("company").all()
+
+
+class BranchDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAuthenticated, HasPermission("device.manage")]
+    queryset = Branch.objects.all()
+    serializer_class = BranchSerializer
+
+
+class DepartmentListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated, HasPermission("device.manage")]
+    serializer_class = DepartmentSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["branch"]
+    queryset = Department.objects.select_related("branch", "branch__company").all()
+
+
+class DepartmentDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAuthenticated, HasPermission("device.manage")]
+    queryset = Department.objects.all()
+    serializer_class = DepartmentSerializer
+
+
+class EmployeeListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated, HasPermission("device.manage")]
+    serializer_class = EmployeeSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["department"]
+    queryset = Employee.objects.select_related("department").all()
+
+
+class EmployeeDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAuthenticated, HasPermission("device.manage")]
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer

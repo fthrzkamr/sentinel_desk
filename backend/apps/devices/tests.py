@@ -6,7 +6,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import Permission, Role, User
 from apps.audit.models import AuditLog
-from apps.devices.models import Device, DeviceCredential, EnrollmentToken
+from apps.devices.models import Branch, Company, Department, Device, DeviceCredential, Employee, EnrollmentToken
 
 
 @pytest.fixture
@@ -197,3 +197,109 @@ def test_viewer_role_cannot_disable_device(db, enrollment_token):
     response = viewer_client.post(f"/api/devices/{device_id}/disable/")
 
     assert response.status_code == 403
+
+
+@pytest.fixture
+def org_manager_role(db):
+    role = Role.objects.create(name="ORG_MANAGER_TEST")
+    role.permissions.set([Permission.objects.get_or_create(code="device.manage")[0]])
+    return role
+
+
+@pytest.fixture
+def org_manager_user(db, org_manager_role):
+    return User.objects.create_user(
+        username="orgmanager", email="orgmanager@example.com", password="StrongPass123!", role=org_manager_role
+    )
+
+
+def _client_for(username):
+    client = APIClient()
+    login = client.post("/api/auth/login/", {"username": username, "password": "StrongPass123!"}, format="json")
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+    return client
+
+
+@pytest.fixture
+def org_tree(db):
+    company = Company.objects.create(name="Acme Corp")
+    branch = Branch.objects.create(company=company, name="Jakarta")
+    department = Department.objects.create(branch=branch, name="IT")
+    employee = Employee.objects.create(department=department, full_name="Budi Santoso")
+    return company, branch, department, employee
+
+
+@pytest.mark.django_db
+def test_org_crud_requires_device_manage_permission(org_manager_user, admin_user):
+    manager_client = _client_for("orgmanager")
+    plain_client = _client_for("itadmin")  # agent_manage_role, no device.manage
+
+    create = manager_client.post("/api/companies/", {"name": "Acme Corp"}, format="json")
+    assert create.status_code == 201
+
+    denied = plain_client.post("/api/companies/", {"name": "Should Fail"}, format="json")
+    assert denied.status_code == 403
+
+
+@pytest.mark.django_db
+def test_branch_department_employee_cascade_and_filter(org_manager_user, org_tree):
+    company, branch, department, employee = org_tree
+    client = _client_for("orgmanager")
+
+    other_company = Company.objects.create(name="Other Co")
+    Branch.objects.create(company=other_company, name="Bandung")
+
+    response = client.get(f"/api/branches/?company={company.id}")
+    assert response.status_code == 200
+    assert response.data["count"] == 1
+    assert response.data["results"][0]["name"] == "Jakarta"
+
+    dept_response = client.get(f"/api/departments/?branch={branch.id}")
+    assert dept_response.data["count"] == 1
+
+    emp_response = client.get(f"/api/employees/?department={department.id}")
+    assert emp_response.data["count"] == 1
+    assert emp_response.data["results"][0]["full_name"] == "Budi Santoso"
+
+
+@pytest.mark.django_db
+def test_enrollment_token_with_org_assignment_applies_to_device(admin_user, org_tree):
+    company, branch, department, employee = org_tree
+    client = _client_for("itadmin")
+
+    create = client.post(
+        "/api/agent/enrollment-tokens/",
+        {
+            "label": "laptop-budi",
+            "ttl_minutes": 30,
+            "company": company.id,
+            "branch": branch.id,
+            "department": department.id,
+            "assigned_employee": employee.id,
+        },
+        format="json",
+    )
+    assert create.status_code == 201
+    raw_token = create.data["token"]
+
+    enroll_response = APIClient().post(
+        "/api/agent/enroll/", {"token": raw_token, "hostname": "LAPTOP-BUDI"}, format="json"
+    )
+    assert enroll_response.status_code == 201
+
+    device = Device.objects.get(device_id=enroll_response.data["device_id"])
+    assert device.company_id == company.id
+    assert device.branch_id == branch.id
+    assert device.department_id == department.id
+    assert device.assigned_employee_id == employee.id
+
+
+@pytest.mark.django_db
+def test_enrollment_token_without_org_assignment_leaves_device_unassigned(admin_user, enrollment_token):
+    _, raw_token = enrollment_token
+    enroll_response = APIClient().post(
+        "/api/agent/enroll/", {"token": raw_token, "hostname": "LAPTOP-PLAIN"}, format="json"
+    )
+    device = Device.objects.get(device_id=enroll_response.data["device_id"])
+    assert device.company_id is None
+    assert device.branch_id is None

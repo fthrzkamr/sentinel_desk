@@ -579,6 +579,43 @@ sewaktu-waktu. Sekarang bisa langsung dari UI, berlaku seketika.
   semua passed. Nilai yang sempat diubah untuk testing dikembalikan ke
   default semula setelahnya.
 
+## Pengembangan tambahan (pasca-roadmap): assignment organisasi, hardware identity, remote access, UX
+
+- **Devices**: kolom Manufacturer/Model/Serial Number di tab Hardware yang
+  sebelumnya selalu kosong sekarang benar-benar terisi — agent
+  (`agent/src/monitoring/system_info.py`) sekarang mengambilnya lewat WMI
+  (`Win32_ComputerSystem`, `Win32_BIOS`) via pywin32 (sudah jadi dependency,
+  tidak perlu package baru). Hanya berlaku untuk device yang enroll ulang
+  setelah perubahan ini — data ini snapshot sekali saat pendaftaran, bukan
+  dikirim ulang tiap heartbeat.
+- **Assignment organisasi otomatis saat bikin token**: sebelumnya
+  Company/Branch/Department/Karyawan cuma bisa diisi lewat Django Admin dan
+  tidak terhubung ke device sama sekali. Sekarang: (1) halaman **Agents**
+  punya panel "Kelola Struktur Organisasi" (CRUD sederhana, permission baru
+  `device.manage` — sudah ada di seed RBAC sejak awal tapi belum pernah
+  dipakai di endpoint manapun), (2) form "Buat Enrollment Token" punya
+  dropdown cascading Company → Branch → Department → Karyawan (semua
+  opsional), (3) `EnrollmentToken` sekarang menyimpan pilihan itu dan
+  **otomatis** meng-copy-nya ke `Device` begitu device enroll pakai token
+  tersebut (`AgentEnrollView`) — tidak perlu assignment manual lagi
+  setelahnya. Endpoint baru: `GET/POST /api/companies|branches|departments|employees/`.
+- **Login gagal lewat ngrok/LAN, Dashboard Avg CPU/RAM yang bisa
+  menyembunyikan outlier, dan device offline yang nyangkut ONLINE selamanya**
+  — tiga masalah operasional nyata yang ditemukan lewat pemakaian langsung,
+  bukan lewat testing — sudah diperbaiki (lihat detail commit): Vite
+  dev-server proxy untuk `/api`+`/ws`, `celery_worker`+`celery_beat`
+  ditambahkan sebagai service permanen di `docker-compose.yml`, dan kartu
+  Avg CPU/RAM dihapus dari Dashboard.
+- **Devices**: tombol Action (View/Disable) yang tadinya teks polos
+  sekarang jadi tombol beneran (outline + solid merah/hijau).
+- Diuji end-to-end lewat browser sungguhan: bikin Company → Branch →
+  Department → Karyawan dari nol lewat UI, bikin token dengan ke-4-nya
+  dipilih (cascading select bekerja benar), enroll device sungguhan pakai
+  token itu, device otomatis ter-assign lengkap tanpa langkah manual
+  tambahan — dikonfirmasi langsung di tab Overview Device Detail. 4 pytest
+  baru untuk org structure + auto-assignment — total 81 test, semua passed.
+  Data demo (company "PT Sentinel Jaya" dkk.) dibersihkan setelah verifikasi.
+
 ## Testing cepat (manual)
 
 ```bash
