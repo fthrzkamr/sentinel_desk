@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { createEnrollmentToken, listEnrollmentTokens, revokeEnrollmentToken } from '@/services/devices'
@@ -8,6 +8,10 @@ import {
   createCompany,
   createDepartment,
   createEmployee,
+  deleteBranch,
+  deleteCompany,
+  deleteDepartment,
+  deleteEmployee,
   listBranches,
   listCompanies,
   listDepartments,
@@ -164,13 +168,24 @@ const newBranch = reactive({ company: '', name: '' })
 const newDepartment = reactive({ branch: '', name: '' })
 const newEmployee = reactive({ department: '', full_name: '', email: '', position: '' })
 
-// Flat, unfiltered lists (not chained off another dropdown's selection) —
-// each card's own "pick the parent" select needs every branch/department
-// that exists regardless of what's picked elsewhere on the panel, otherwise
-// e.g. the Department card's branch picker would stay empty until the
-// Branch card above it happened to be touched first.
+// Flat, unfiltered — each card's own "pick the parent" dropdown needs every
+// branch/department that exists regardless of what's picked elsewhere on
+// the panel (a plain <select> handles dozens of options fine). The
+// *displayed list* below each dropdown is a different story — with real
+// data (20 branches, 88 departments) dumping all of them unfiltered turned
+// into an unreadable wall of repeated names, so those lists are filtered
+// down to just the currently-selected parent instead (see the filtered*
+// computed properties).
 const panelBranches = ref([])
 const panelDepartments = ref([])
+const panelEmployees = ref([])
+
+const filteredPanelBranches = computed(() =>
+  newBranch.company ? panelBranches.value.filter((b) => b.company === newBranch.company) : [],
+)
+const filteredPanelDepartments = computed(() =>
+  newDepartment.branch ? panelDepartments.value.filter((d) => d.branch === newDepartment.branch) : [],
+)
 
 async function fetchPanelBranches() {
   const { data } = await listBranches({ page_size: 200 })
@@ -182,8 +197,19 @@ async function fetchPanelDepartments() {
   panelDepartments.value = data.results
 }
 
+async function fetchPanelEmployees() {
+  if (!newEmployee.department) {
+    panelEmployees.value = []
+    return
+  }
+  const { data } = await listEmployees({ department: newEmployee.department, page_size: 200 })
+  panelEmployees.value = data.results
+}
+
+watch(() => newEmployee.department, fetchPanelEmployees)
+
 async function refreshOrgLists() {
-  await Promise.all([fetchCompanies(), fetchPanelBranches(), fetchPanelDepartments()])
+  await Promise.all([fetchCompanies(), fetchPanelBranches(), fetchPanelDepartments(), fetchPanelEmployees()])
 }
 
 async function handleAddCompany() {
@@ -235,8 +261,69 @@ async function handleAddEmployee() {
     newEmployee.full_name = ''
     newEmployee.email = ''
     newEmployee.position = ''
+    await fetchPanelEmployees()
   } catch (error) {
     orgError.value = error.response?.data?.full_name?.[0] || 'Gagal menambah karyawan.'
+  }
+}
+
+// --- Delete (company/branch deletion cascades to what's under it; an
+// employee losing its department just clears that link, it's never deleted
+// as a side effect) ---
+
+const deleteConfirm = reactive({ open: false, type: '', id: null, label: '', warning: '' })
+
+function askDeleteCompany(company) {
+  Object.assign(deleteConfirm, {
+    open: true,
+    type: 'company',
+    id: company.id,
+    label: company.name,
+    warning: 'Semua Branch dan Department di bawahnya ikut terhapus. Karyawan tidak ikut terhapus, hanya kehilangan assignment-nya.',
+  })
+}
+
+function askDeleteBranch(branch) {
+  Object.assign(deleteConfirm, {
+    open: true,
+    type: 'branch',
+    id: branch.id,
+    label: branch.name,
+    warning: 'Semua Department di bawahnya ikut terhapus. Karyawan tidak ikut terhapus, hanya kehilangan assignment-nya.',
+  })
+}
+
+function askDeleteDepartment(department) {
+  Object.assign(deleteConfirm, {
+    open: true,
+    type: 'department',
+    id: department.id,
+    label: department.name,
+    warning: 'Karyawan di department ini tidak ikut terhapus, hanya kehilangan assignment-nya.',
+  })
+}
+
+function askDeleteEmployee(employee) {
+  Object.assign(deleteConfirm, {
+    open: true,
+    type: 'employee',
+    id: employee.id,
+    label: employee.full_name,
+    warning: '',
+  })
+}
+
+async function confirmDelete() {
+  deleteConfirm.open = false
+  orgError.value = ''
+  try {
+    if (deleteConfirm.type === 'company') await deleteCompany(deleteConfirm.id)
+    else if (deleteConfirm.type === 'branch') await deleteBranch(deleteConfirm.id)
+    else if (deleteConfirm.type === 'department') await deleteDepartment(deleteConfirm.id)
+    else if (deleteConfirm.type === 'employee') await deleteEmployee(deleteConfirm.id)
+    await refreshOrgLists()
+  } catch (error) {
+    orgError.value = error.response?.data?.detail || 'Gagal menghapus.'
   }
 }
 </script>
@@ -367,7 +454,9 @@ async function handleAddEmployee() {
 
       <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-4">
         <div class="space-y-2 rounded-lg border border-slate-100 p-3">
-          <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500">Company</h3>
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Company <span class="font-normal normal-case text-slate-400">({{ companies.length }})</span>
+          </h3>
           <form class="flex gap-1.5" @submit.prevent="handleAddCompany">
             <input
               v-model="newCompanyName"
@@ -379,14 +468,19 @@ async function handleAddEmployee() {
               Tambah
             </button>
           </form>
-          <ul class="space-y-1 text-xs text-slate-600">
-            <li v-for="c in companies" :key="c.id" class="rounded bg-slate-50 px-2 py-1">{{ c.name }}</li>
+          <ul class="max-h-48 space-y-1 overflow-y-auto text-xs text-slate-600">
+            <li v-for="c in companies" :key="c.id" class="flex items-center justify-between rounded bg-slate-50 px-2 py-1">
+              <span>{{ c.name }}</span>
+              <button class="text-slate-400 hover:text-red-600" title="Hapus" @click="askDeleteCompany(c)">✕</button>
+            </li>
             <li v-if="companies.length === 0" class="text-slate-400">Belum ada.</li>
           </ul>
         </div>
 
         <div class="space-y-2 rounded-lg border border-slate-100 p-3">
-          <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500">Branch</h3>
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Branch <span class="font-normal normal-case text-slate-400">({{ panelBranches.length }} total)</span>
+          </h3>
           <select v-model="newBranch.company" class="w-full rounded-md border border-slate-300 px-2 py-1 text-xs">
             <option value="">Pilih company...</option>
             <option v-for="c in companies" :key="c.id" :value="c.id">{{ c.name }}</option>
@@ -407,14 +501,24 @@ async function handleAddEmployee() {
               Tambah
             </button>
           </form>
-          <ul class="space-y-1 text-xs text-slate-600">
-            <li v-for="b in panelBranches" :key="b.id" class="rounded bg-slate-50 px-2 py-1">{{ b.name }}</li>
-            <li v-if="newBranch.company && panelBranches.length === 0" class="text-slate-400">Belum ada.</li>
+          <ul class="max-h-48 space-y-1 overflow-y-auto text-xs text-slate-600">
+            <li
+              v-for="b in filteredPanelBranches"
+              :key="b.id"
+              class="flex items-center justify-between rounded bg-slate-50 px-2 py-1"
+            >
+              <span>{{ b.name }}</span>
+              <button class="text-slate-400 hover:text-red-600" title="Hapus" @click="askDeleteBranch(b)">✕</button>
+            </li>
+            <li v-if="newBranch.company && filteredPanelBranches.length === 0" class="text-slate-400">Belum ada.</li>
+            <li v-if="!newBranch.company" class="text-slate-400">Pilih company untuk lihat branch-nya.</li>
           </ul>
         </div>
 
         <div class="space-y-2 rounded-lg border border-slate-100 p-3">
-          <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500">Department</h3>
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Department <span class="font-normal normal-case text-slate-400">({{ panelDepartments.length }} total)</span>
+          </h3>
           <select v-model="newDepartment.branch" class="w-full rounded-md border border-slate-300 px-2 py-1 text-xs">
             <option value="">Pilih branch...</option>
             <option v-for="b in panelBranches" :key="b.id" :value="b.id">{{ b.company_name }} / {{ b.name }}</option>
@@ -435,9 +539,17 @@ async function handleAddEmployee() {
               Tambah
             </button>
           </form>
-          <ul class="space-y-1 text-xs text-slate-600">
-            <li v-for="d in panelDepartments" :key="d.id" class="rounded bg-slate-50 px-2 py-1">{{ d.name }}</li>
-            <li v-if="newDepartment.branch && panelDepartments.length === 0" class="text-slate-400">Belum ada.</li>
+          <ul class="max-h-48 space-y-1 overflow-y-auto text-xs text-slate-600">
+            <li
+              v-for="d in filteredPanelDepartments"
+              :key="d.id"
+              class="flex items-center justify-between rounded bg-slate-50 px-2 py-1"
+            >
+              <span>{{ d.name }}</span>
+              <button class="text-slate-400 hover:text-red-600" title="Hapus" @click="askDeleteDepartment(d)">✕</button>
+            </li>
+            <li v-if="newDepartment.branch && filteredPanelDepartments.length === 0" class="text-slate-400">Belum ada.</li>
+            <li v-if="!newDepartment.branch" class="text-slate-400">Pilih branch untuk lihat department-nya.</li>
           </ul>
         </div>
 
@@ -470,11 +582,33 @@ async function handleAddEmployee() {
               Tambah Karyawan
             </button>
           </form>
+          <ul class="max-h-48 space-y-1 overflow-y-auto text-xs text-slate-600">
+            <li
+              v-for="e in panelEmployees"
+              :key="e.id"
+              class="flex items-center justify-between rounded bg-slate-50 px-2 py-1"
+            >
+              <span>{{ e.full_name }}</span>
+              <button class="text-slate-400 hover:text-red-600" title="Hapus" @click="askDeleteEmployee(e)">✕</button>
+            </li>
+            <li v-if="newEmployee.department && panelEmployees.length === 0" class="text-slate-400">Belum ada.</li>
+            <li v-if="!newEmployee.department" class="text-slate-400">Pilih department untuk lihat karyawannya.</li>
+          </ul>
         </div>
       </div>
 
       <p v-if="orgError" class="mt-3 text-sm text-red-600">{{ orgError }}</p>
     </div>
+
+    <ConfirmDialog
+      :open="deleteConfirm.open"
+      :title="`Hapus ${deleteConfirm.label}?`"
+      :message="deleteConfirm.warning || 'Tindakan ini tidak bisa dibatalkan.'"
+      confirm-label="Hapus"
+      danger
+      @confirm="confirmDelete"
+      @cancel="deleteConfirm.open = false"
+    />
 
     <div class="overflow-x-auto rounded-xl bg-white shadow-sm ring-1 ring-slate-900/5">
       <table class="min-w-full divide-y divide-slate-200 text-sm">

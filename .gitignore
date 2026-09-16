@@ -4,6 +4,12 @@
 !.env.example
 !.env.prod.example
 
+# Sensitive source data (real PII — NIK/KTP/KK numbers, bank accounts, home
+# addresses — used to seed the org structure via a one-off import, never
+# meant to sit in version control)
+*.xlsx
+*.xls
+
 # Python
 backend/venv/
 __pycache__/
