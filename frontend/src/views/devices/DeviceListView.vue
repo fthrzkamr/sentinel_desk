@@ -128,7 +128,7 @@ async function confirmToggle() {
             <th class="px-4 py-3">Device ID</th>
             <th class="px-4 py-3">Hostname</th>
             <th class="px-4 py-3">User</th>
-            <th class="px-4 py-3">IP</th>
+            <th class="px-4 py-3">Karyawan</th>
             <th class="px-4 py-3">CPU</th>
             <th class="px-4 py-3">RAM</th>
             <th class="px-4 py-3">Disk</th>
@@ -153,7 +153,7 @@ async function confirmToggle() {
             <td class="px-4 py-3 font-mono text-xs text-slate-700">{{ device.device_id }}</td>
             <td class="px-4 py-3">{{ device.hostname }}</td>
             <td class="px-4 py-3">{{ device.username || '-' }}</td>
-            <td class="px-4 py-3">{{ device.ip_address || '-' }}</td>
+            <td class="px-4 py-3">{{ device.assigned_employee || '-' }}</td>
             <td class="px-4 py-3">
               <div v-if="usagePercent(device, 'cpu_percent') !== null" class="font-medium text-slate-700">
                 {{ usagePercent(device, 'cpu_percent') }}%

@@ -8,6 +8,7 @@ import LiveScreenPanel from '@/components/LiveScreenPanel.vue'
 import MetricTrendChart from '@/components/MetricTrendChart.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import UsageBar from '@/components/UsageBar.vue'
+import { listAuditLogs } from '@/services/audit'
 import { disableDevice, enableDevice, getDevice, updateDeviceOrgAssignment } from '@/services/devices'
 import { getDeviceLocationHistory } from '@/services/locations'
 import { getLatestMetric, getMetricHistory } from '@/services/monitoring'
@@ -37,8 +38,7 @@ const tabs = computed(() => [
   { key: 'software', label: 'Software', available: true },
   { key: 'location', label: 'Location', available: true },
   { key: 'live-screen', label: 'Live Screen', available: auth.hasPermission('monitoring.live_screen') },
-  { key: 'history', label: 'History', available: false },
-  { key: 'audit', label: 'Audit', available: false },
+  { key: 'audit', label: 'Audit', available: auth.hasPermission('audit.view') },
 ])
 
 const liveMetric = computed(() => monitoring.liveDevices[route.params.deviceId])
@@ -281,10 +281,35 @@ const locationMarkers = computed(() =>
     : [],
 )
 
+const auditLogs = ref([])
+const isAuditLoading = ref(false)
+const auditLoaded = ref(false)
+
+async function fetchAuditLogs() {
+  isAuditLoading.value = true
+  try {
+    const { data } = await listAuditLogs({ device_id: route.params.deviceId, page_size: 50 })
+    auditLogs.value = data.results
+    auditLoaded.value = true
+  } catch {
+    auditLogs.value = []
+  } finally {
+    isAuditLoading.value = false
+  }
+}
+
+function formatAuditMetadata(metadata) {
+  if (!metadata || Object.keys(metadata).length === 0) return '-'
+  return Object.entries(metadata)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(', ')
+}
+
 watch(activeTab, (tab) => {
   if (tab === 'software' && !softwareLoaded.value) fetchSoftware()
   if (tab === 'location' && !locationLoaded.value) fetchLocationHistory()
   if (tab === 'metrics' && !historyLoaded.value) fetchMetricHistory()
+  if (tab === 'audit' && !auditLoaded.value) fetchAuditLogs()
 })
 
 onMounted(() => {
@@ -628,6 +653,38 @@ async function confirmToggle() {
 
           <div v-else-if="activeTab === 'live-screen'">
             <LiveScreenPanel :key="device.device_id" :device-id="device.device_id" />
+          </div>
+
+          <div v-else-if="activeTab === 'audit'" class="space-y-3">
+            <p class="text-xs text-slate-400">Aktivitas administratif tercatat untuk device ini (read-only).</p>
+            <div class="overflow-x-auto rounded-lg border border-slate-100">
+              <table class="min-w-full divide-y divide-slate-100 text-sm">
+                <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th class="px-4 py-2">Waktu</th>
+                    <th class="px-4 py-2">User</th>
+                    <th class="px-4 py-2">Action</th>
+                    <th class="px-4 py-2">IP</th>
+                    <th class="px-4 py-2">Detail</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  <tr v-if="isAuditLoading">
+                    <td colspan="5" class="px-4 py-6 text-center text-slate-400">Memuat data...</td>
+                  </tr>
+                  <tr v-else-if="auditLogs.length === 0">
+                    <td colspan="5" class="px-4 py-6 text-center text-slate-400">Belum ada aktivitas tercatat untuk device ini.</td>
+                  </tr>
+                  <tr v-for="log in auditLogs" v-else :key="log.id" class="hover:bg-slate-50">
+                    <td class="px-4 py-2 whitespace-nowrap text-slate-500">{{ new Date(log.created_at).toLocaleString() }}</td>
+                    <td class="px-4 py-2 text-slate-600">{{ log.username || 'System' }}</td>
+                    <td class="px-4 py-2 font-mono text-xs text-brand-700">{{ log.action }}</td>
+                    <td class="px-4 py-2 text-slate-500">{{ log.ip_address || '-' }}</td>
+                    <td class="px-4 py-2 text-xs text-slate-500">{{ formatAuditMetadata(log.metadata) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div v-else class="py-10 text-center text-sm text-slate-400">

@@ -73,12 +73,6 @@ const routes = [
         meta: { permission: 'audit.view' },
       },
       {
-        path: 'history',
-        name: 'history',
-        component: () => import('@/views/history/HistoryView.vue'),
-        meta: { permission: 'monitoring.view' },
-      },
-      {
         path: 'settings',
         name: 'settings',
         component: () => import('@/views/settings/SettingsView.vue'),

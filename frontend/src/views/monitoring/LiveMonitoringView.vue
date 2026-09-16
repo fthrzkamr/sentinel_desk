@@ -2,14 +2,18 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import LiveScreenPanel from '@/components/LiveScreenPanel.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import UsageBar from '@/components/UsageBar.vue'
 import { listDevices } from '@/services/devices'
+import { useAuthStore } from '@/stores/auth'
 import { useMonitoringStore } from '@/stores/monitoring'
 import { timeAgo } from '@/utils/time'
 
 const router = useRouter()
+const auth = useAuthStore()
 const monitoring = useMonitoringStore()
+const liveScreenDevice = ref(null)
 
 const devices = ref([])
 const isLoading = ref(true)
@@ -83,6 +87,14 @@ onUnmounted(() => {
 function goToDetail(device) {
   router.push({ name: 'device-detail', params: { deviceId: device.device_id } })
 }
+
+function openLiveScreen(device) {
+  liveScreenDevice.value = device
+}
+
+function closeLiveScreen() {
+  liveScreenDevice.value = null
+}
 </script>
 
 <template>
@@ -124,6 +136,10 @@ function goToDetail(device) {
           <div class="min-w-0">
             <p class="truncate font-mono text-xs text-slate-500">{{ device.device_id }}</p>
             <p class="truncate text-sm font-semibold text-slate-800">{{ device.hostname }}</p>
+            <p class="truncate text-xs text-slate-500">
+              {{ device.assigned_employee || 'Belum di-assign' }}
+              <span v-if="device.branch"> · {{ device.branch }}</span>
+            </p>
           </div>
           <StatusBadge :status="displayStatus(device)" />
         </div>
@@ -138,6 +154,39 @@ function goToDetail(device) {
           <span>{{ device.username || 'Tidak ada user login' }}</span>
           <span>{{ timeAgo(lastSeen(device)) }}</span>
         </div>
+
+        <button
+          v-if="auth.hasPermission('monitoring.live_screen')"
+          class="w-full rounded-lg border border-slate-200 py-1.5 text-xs font-medium text-slate-600 hover:border-brand-300 hover:text-brand-700"
+          @click.stop="openLiveScreen(device)"
+        >
+          Lihat Layar
+        </button>
+      </div>
+    </div>
+
+    <div
+      v-if="liveScreenDevice"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+      @click.self="closeLiveScreen"
+    >
+      <div class="w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl">
+        <div class="mb-3 flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <p class="truncate text-sm font-semibold text-slate-800">
+              {{ liveScreenDevice.hostname }}
+              <span class="font-mono text-xs font-normal text-slate-400">({{ liveScreenDevice.device_id }})</span>
+            </p>
+            <p class="truncate text-xs text-slate-500">
+              {{ liveScreenDevice.assigned_employee || 'Belum di-assign' }}
+              <span v-if="liveScreenDevice.branch"> · {{ liveScreenDevice.branch }}</span>
+            </p>
+          </div>
+          <button class="shrink-0 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" @click="closeLiveScreen">
+            ✕
+          </button>
+        </div>
+        <LiveScreenPanel :key="liveScreenDevice.device_id" :device-id="liveScreenDevice.device_id" />
       </div>
     </div>
   </div>

@@ -140,15 +140,25 @@ const greeting = computed(() => {
       </div>
       <div class="overflow-x-auto">
         <table class="min-w-full divide-y divide-slate-100 text-sm">
+          <thead class="text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="px-5 py-2.5">Device ID</th>
+              <th class="px-5 py-2.5">Hostname</th>
+              <th class="px-5 py-2.5">Karyawan</th>
+              <th class="px-5 py-2.5">Cabang</th>
+              <th class="px-5 py-2.5">Status</th>
+              <th class="px-5 py-2.5">Last Seen</th>
+            </tr>
+          </thead>
           <tbody class="divide-y divide-slate-100">
             <tr v-if="isLoading">
-              <td class="px-5 py-10 text-center text-slate-400">Memuat data...</td>
+              <td colspan="6" class="px-5 py-10 text-center text-slate-400">Memuat data...</td>
             </tr>
             <tr v-else-if="errorMessage">
-              <td class="px-5 py-10 text-center text-red-500">{{ errorMessage }}</td>
+              <td colspan="6" class="px-5 py-10 text-center text-red-500">{{ errorMessage }}</td>
             </tr>
             <tr v-else-if="recentlyActive.length === 0">
-              <td class="px-5 py-10 text-center">
+              <td colspan="6" class="px-5 py-10 text-center">
                 <div class="flex flex-col items-center gap-2 text-slate-400">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="h-10 w-10 text-slate-300">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m-9 0h9m-9 0H4.5A2.25 2.25 0 012.25 15V5.25A2.25 2.25 0 014.5 3h15a2.25 2.25 0 012.25 2.25V15a2.25 2.25 0 01-2.25 2.25H15" />
@@ -163,6 +173,8 @@ const greeting = computed(() => {
             <tr v-for="device in recentlyActive" v-else :key="device.id" class="hover:bg-slate-50">
               <td class="px-5 py-3 font-mono text-xs text-slate-600">{{ device.device_id }}</td>
               <td class="px-5 py-3">{{ device.hostname }}</td>
+              <td class="px-5 py-3">{{ device.assigned_employee || '-' }}</td>
+              <td class="px-5 py-3">{{ device.branch || '-' }}</td>
               <td class="px-5 py-3"><StatusBadge :status="device.status" /></td>
               <td class="px-5 py-3 text-slate-500">{{ timeAgo(device.last_seen) }}</td>
             </tr>
