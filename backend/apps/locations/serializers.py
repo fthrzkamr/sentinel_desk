@@ -19,8 +19,21 @@ class LocationIngestSerializer(serializers.Serializer):
 class LocationSerializer(serializers.ModelSerializer):
     device_id = serializers.CharField(source="device.device_id", read_only=True)
     hostname = serializers.CharField(source="device.hostname", read_only=True)
+    assigned_employee = serializers.StringRelatedField(source="device.assigned_employee")
+    branch = serializers.StringRelatedField(source="device.branch")
 
     class Meta:
         model = Location
-        fields = ["id", "device_id", "hostname", "latitude", "longitude", "accuracy_meters", "source", "recorded_at"]
+        fields = [
+            "id",
+            "device_id",
+            "hostname",
+            "assigned_employee",
+            "branch",
+            "latitude",
+            "longitude",
+            "accuracy_meters",
+            "source",
+            "recorded_at",
+        ]
         read_only_fields = fields

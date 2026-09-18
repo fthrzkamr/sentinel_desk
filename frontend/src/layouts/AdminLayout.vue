@@ -14,7 +14,7 @@ const route = useRoute()
 const rawNavItems = [
   { label: 'Dashboard', to: '/', icon: 'home', section: 'Menu' },
   { label: 'Devices', to: '/devices', icon: 'monitor', permission: 'device.view', section: 'Menu' },
-  { label: 'Live Monitoring', to: '/live-monitoring', icon: 'activity', permission: 'monitoring.view', section: 'Menu' },
+  { label: 'Monitoring', to: '/live-monitoring', icon: 'activity', permission: 'monitoring.view', section: 'Menu' },
   { label: 'Map', to: '/map', icon: 'map-pin', permission: 'location.view', section: 'Menu' },
   { label: 'Software', to: '/software', icon: 'package', permission: 'software.view', section: 'Manajemen' },
   { label: 'Alerts', to: '/alerts', icon: 'bell', permission: 'alert.view', section: 'Manajemen' },

@@ -200,3 +200,29 @@ def test_manager_can_reset_another_users_password(user_manager, user):
 def test_role_list_requires_user_manage_permission(user_manager, user):
     assert _client_for("umanager").get("/api/roles/").status_code == 200
     assert _client_for("alice").get("/api/roles/").status_code == 403
+
+
+@pytest.mark.django_db
+def test_manager_can_delete_another_user(user_manager, user):
+    client = _client_for("umanager")
+    response = client.delete(f"/api/users/{user.id}/")
+    assert response.status_code == 204
+    assert not User.objects.filter(pk=user.id).exists()
+    assert AuditLog.objects.filter(action="user.deleted").exists()
+
+
+@pytest.mark.django_db
+def test_manager_cannot_delete_own_account(user_manager):
+    client = _client_for("umanager")
+    response = client.delete(f"/api/users/{user_manager.id}/")
+    assert response.status_code == 400
+    assert User.objects.filter(pk=user_manager.id).exists()
+
+
+@pytest.mark.django_db
+def test_manager_cannot_delete_a_superuser(user_manager):
+    superuser = User.objects.create_superuser(username="root", email="root@example.com", password="RootPass123!")
+    client = _client_for("umanager")
+    response = client.delete(f"/api/users/{superuser.id}/")
+    assert response.status_code == 400
+    assert User.objects.filter(pk=superuser.id).exists()

@@ -105,7 +105,7 @@ class UserListCreateView(generics.ListCreateAPIView):
         return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
 
 
-class UserDetailView(generics.RetrieveUpdateAPIView):
+class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAuthenticated, HasPermission("user.manage")]
     queryset = User.objects.select_related("role").all()
 
@@ -124,6 +124,27 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
             metadata={"target_user_id": user.id, "changed_fields": list(request.data.keys())},
         )
         return Response(UserSerializer(user).data)
+
+    def destroy(self, request, *args, **kwargs):
+        user = self.get_object()
+        if user.pk == request.user.pk:
+            return Response(
+                {"detail": "Anda tidak bisa menghapus akun sendiri."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        if user.is_superuser:
+            return Response(
+                {"detail": "Akun superuser tidak bisa dihapus dari sini."}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        username, user_id = user.username, user.pk
+        user.delete()
+        log_action(
+            user=request.user,
+            action="user.deleted",
+            request=request,
+            metadata={"target_user_id": user_id, "username": username},
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class UserActivateView(APIView):

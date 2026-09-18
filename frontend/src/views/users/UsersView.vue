@@ -8,6 +8,7 @@ import {
   activateUser,
   createUser,
   deactivateUser,
+  deleteUser,
   listRoles,
   listUsers,
   resetUserPassword,
@@ -90,11 +91,19 @@ function askToggleActive(user) {
   confirmState.action = user.is_active ? 'deactivate' : 'activate'
 }
 
+function askDelete(user) {
+  confirmState.open = true
+  confirmState.user = user
+  confirmState.action = 'delete'
+}
+
 async function confirmToggleActive() {
   confirmState.open = false
   const { user, action } = confirmState
   try {
-    if (action === 'deactivate') {
+    if (action === 'delete') {
+      await deleteUser(user.id)
+    } else if (action === 'deactivate') {
       await deactivateUser(user.id)
     } else {
       await activateUser(user.id)
@@ -194,15 +203,27 @@ async function confirmResetPassword() {
             </td>
             <td class="px-4 py-3 text-slate-500">{{ u.last_login ? new Date(u.last_login).toLocaleString() : 'Belum pernah' }}</td>
             <td class="px-4 py-3 text-right">
-              <div class="flex justify-end gap-3">
-                <button class="text-slate-600 hover:underline" @click="askResetPassword(u)">Reset Password</button>
+              <div class="flex justify-end gap-2">
+                <button
+                  class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  @click="askResetPassword(u)"
+                >
+                  Reset Password
+                </button>
                 <button
                   v-if="u.id !== auth.user?.id"
-                  class="hover:underline"
-                  :class="u.is_active ? 'text-red-600' : 'text-emerald-600'"
+                  class="rounded-md border px-2.5 py-1 text-xs font-medium"
+                  :class="u.is_active ? 'border-amber-300 text-amber-700 hover:bg-amber-50' : 'border-emerald-300 text-emerald-700 hover:bg-emerald-50'"
                   @click="askToggleActive(u)"
                 >
                   {{ u.is_active ? 'Nonaktifkan' : 'Aktifkan' }}
+                </button>
+                <button
+                  v-if="u.id !== auth.user?.id && !u.is_superuser"
+                  class="rounded-md bg-red-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700"
+                  @click="askDelete(u)"
+                >
+                  Hapus
                 </button>
               </div>
             </td>
@@ -213,10 +234,18 @@ async function confirmResetPassword() {
 
     <ConfirmDialog
       :open="confirmState.open"
-      :title="confirmState.action === 'deactivate' ? 'Nonaktifkan user?' : 'Aktifkan kembali user?'"
-      :message="`${confirmState.user?.username} akan di-${confirmState.action === 'deactivate' ? 'nonaktifkan' : 'aktifkan kembali'}.`"
-      :confirm-label="confirmState.action === 'deactivate' ? 'Nonaktifkan' : 'Aktifkan'"
-      :danger="confirmState.action === 'deactivate'"
+      :title="{
+        delete: 'Hapus user?',
+        deactivate: 'Nonaktifkan user?',
+        activate: 'Aktifkan kembali user?',
+      }[confirmState.action]"
+      :message="
+        confirmState.action === 'delete'
+          ? `${confirmState.user?.username} akan dihapus permanen. Riwayat aktivitasnya (audit log, alert, dll) tetap tersimpan tapi tidak lagi terhubung ke akun ini.`
+          : `${confirmState.user?.username} akan di-${confirmState.action === 'deactivate' ? 'nonaktifkan' : 'aktifkan kembali'}.`
+      "
+      :confirm-label="{ delete: 'Hapus', deactivate: 'Nonaktifkan', activate: 'Aktifkan' }[confirmState.action]"
+      :danger="confirmState.action === 'delete' || confirmState.action === 'deactivate'"
       @confirm="confirmToggleActive"
       @cancel="confirmState.open = false"
     />

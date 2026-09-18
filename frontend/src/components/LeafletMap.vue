@@ -8,7 +8,13 @@ import shadowUrl from 'leaflet/dist/images/marker-shadow.png'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 // Vite bundles Leaflet's default marker images under a hashed path — without
-// this, markers silently render as broken image icons.
+// this, markers silently render as broken image icons. Leaflet's own
+// Icon.Default._getIconUrl additionally prepends an auto-detected
+// `imagePath` in front of whatever URL mergeOptions sets below, which
+// double-prefixes the already-absolute Vite-resolved URLs above into a
+// broken path — deleting it falls back to the base Icon._getIconUrl, which
+// just returns the configured URL as-is.
+delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({ iconRetinaUrl, iconUrl, shadowUrl })
 
 const props = defineProps({

@@ -101,7 +101,7 @@ function closeLiveScreen() {
   <div class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h1 class="text-xl font-semibold text-slate-800">Live Monitoring</h1>
+        <h1 class="text-xl font-semibold text-slate-800">Monitoring</h1>
         <p class="mt-1 text-xs text-slate-400">
           Semua device dengan agent terpasang, diurutkan yang paling butuh perhatian dulu. Update otomatis lewat
           WebSocket — halaman ini tidak perlu di-refresh manual.

@@ -1,5 +1,7 @@
 import axios from 'axios'
 
+import { useAuthStore } from '@/stores/auth'
+
 // Falls back to a same-origin relative path — correct in production where
 // one edge nginx serves the frontend and proxies /api to the backend on the
 // same domain, whatever that domain ends up being. Local dev always sets
@@ -40,7 +42,12 @@ api.interceptors.response.use(
             })
         }
         const { data } = await refreshPromise
-        localStorage.setItem('sd_access_token', data.access)
+        // Keep the Pinia store in sync too — components that build a WebSocket
+        // URL straight off auth.accessToken (LiveScreenPanel, the dashboard
+        // socket) read the store's reactive copy, not localStorage, so a
+        // refresh that only touched localStorage left them stuck on the old,
+        // now-expired token until a full page reload.
+        useAuthStore().setAccessToken(data.access)
         config.headers.Authorization = `Bearer ${data.access}`
         return api(config)
       } catch (refreshError) {

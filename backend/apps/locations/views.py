@@ -50,7 +50,7 @@ class LocationLatestListView(generics.ListAPIView):
 
     def get_queryset(self):
         return (
-            Location.objects.select_related("device")
+            Location.objects.select_related("device", "device__branch", "device__assigned_employee")
             .order_by("device_id", "-recorded_at")
             .distinct("device_id")
         )

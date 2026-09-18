@@ -40,6 +40,8 @@ const pageCount = ref(0)
 const currentUrl = ref(null)
 const nextUrl = ref(null)
 const previousUrl = ref(null)
+const pageOffset = ref(0)
+const offsetStack = [0]
 
 const confirmState = reactive({ open: false, device: null, action: null })
 
@@ -68,10 +70,27 @@ async function fetchDevices(url = null) {
 let searchDebounce = null
 watch([search, statusFilter], () => {
   clearTimeout(searchDebounce)
-  searchDebounce = setTimeout(() => fetchDevices(), 300)
+  searchDebounce = setTimeout(() => {
+    offsetStack.length = 1
+    offsetStack[0] = 0
+    pageOffset.value = 0
+    fetchDevices()
+  }, 300)
 })
 
 onMounted(fetchDevices)
+
+function goNext() {
+  offsetStack.push(pageOffset.value + devices.value.length)
+  pageOffset.value = offsetStack[offsetStack.length - 1]
+  fetchDevices(nextUrl.value)
+}
+
+function goPrevious() {
+  if (offsetStack.length > 1) offsetStack.pop()
+  pageOffset.value = offsetStack[offsetStack.length - 1]
+  fetchDevices(previousUrl.value)
+}
 
 function goToDetail(device) {
   router.push({ name: 'device-detail', params: { deviceId: device.device_id } })
@@ -125,7 +144,7 @@ async function confirmToggle() {
       <table class="min-w-full divide-y divide-slate-200 text-sm">
         <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
           <tr>
-            <th class="px-4 py-3">Device ID</th>
+            <th class="px-4 py-3">No</th>
             <th class="px-4 py-3">Hostname</th>
             <th class="px-4 py-3">User</th>
             <th class="px-4 py-3">Karyawan</th>
@@ -149,8 +168,8 @@ async function confirmToggle() {
               Belum ada device terdaftar. Buat enrollment token di menu Agents lalu jalankan agent.
             </td>
           </tr>
-          <tr v-for="device in devices" v-else :key="device.id" class="hover:bg-slate-50">
-            <td class="px-4 py-3 font-mono text-xs text-slate-700">{{ device.device_id }}</td>
+          <tr v-for="(device, index) in devices" v-else :key="device.id" class="hover:bg-slate-50">
+            <td class="px-4 py-3 text-slate-500">{{ pageOffset + index + 1 }}</td>
             <td class="px-4 py-3">{{ device.hostname }}</td>
             <td class="px-4 py-3">{{ device.username || '-' }}</td>
             <td class="px-4 py-3">{{ device.assigned_employee || '-' }}</td>
@@ -203,14 +222,14 @@ async function confirmToggle() {
         <button
           class="rounded-md border border-slate-300 px-3 py-1 disabled:opacity-40"
           :disabled="!previousUrl"
-          @click="fetchDevices(previousUrl)"
+          @click="goPrevious"
         >
           Previous
         </button>
         <button
           class="rounded-md border border-slate-300 px-3 py-1 disabled:opacity-40"
           :disabled="!nextUrl"
-          @click="fetchDevices(nextUrl)"
+          @click="goNext"
         >
           Next
         </button>

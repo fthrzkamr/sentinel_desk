@@ -198,8 +198,7 @@ defineExpose({ STATE })
     </div>
 
     <p class="text-xs text-slate-400">
-      Streaming hanya berjalan selama sesi ini aktif. Device yang dipantau akan menampilkan notifikasi bahwa
-      layarnya sedang diawasi. Setiap sesi tercatat pada audit log.
+      Streaming hanya berjalan selama sesi ini aktif. Setiap sesi tercatat pada audit log.
     </p>
   </div>
 </template>

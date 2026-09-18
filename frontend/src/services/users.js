@@ -24,6 +24,10 @@ export function resetUserPassword(id, newPassword) {
   return api.post(`/users/${id}/reset-password/`, { new_password: newPassword })
 }
 
+export function deleteUser(id) {
+  return api.delete(`/users/${id}/`)
+}
+
 export function listRoles() {
   return api.get('/roles/')
 }

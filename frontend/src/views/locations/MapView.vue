@@ -34,7 +34,9 @@ const markers = computed(() =>
       lat: loc.latitude,
       lng: loc.longitude,
       accuracy: loc.accuracy_meters,
-      popupHtml: `<strong>${loc.device_id}</strong><br>${loc.hostname}<br>Sumber: ${
+      popupHtml: `<strong>${loc.device_id}</strong><br>${loc.hostname}<br>${
+        loc.assigned_employee || 'Belum di-assign'
+      }${loc.branch ? ` · ${loc.branch}` : ''}<br>Sumber: ${
         loc.source === 'OS' ? 'OS Location Service' : 'Estimasi IP'
       }`,
     })),
@@ -74,9 +76,20 @@ function goToDevice(deviceId) {
           </h2>
         </div>
         <table class="min-w-full divide-y divide-slate-100 text-sm">
+          <thead class="text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="px-5 py-2.5">Device ID</th>
+              <th class="px-5 py-2.5">Hostname</th>
+              <th class="px-5 py-2.5">Karyawan</th>
+              <th class="px-5 py-2.5">Cabang</th>
+              <th class="px-5 py-2.5">Sumber</th>
+              <th class="px-5 py-2.5">Akurasi</th>
+              <th class="px-5 py-2.5">Waktu</th>
+            </tr>
+          </thead>
           <tbody class="divide-y divide-slate-100">
             <tr v-if="withCoords.length === 0">
-              <td class="px-5 py-6 text-center text-slate-400">Belum ada device dengan lokasi diketahui.</td>
+              <td colspan="7" class="px-5 py-6 text-center text-slate-400">Belum ada device dengan lokasi diketahui.</td>
             </tr>
             <tr
               v-for="loc in withCoords"
@@ -86,6 +99,8 @@ function goToDevice(deviceId) {
             >
               <td class="px-5 py-3 font-mono text-xs text-slate-600">{{ loc.device_id }}</td>
               <td class="px-5 py-3">{{ loc.hostname }}</td>
+              <td class="px-5 py-3">{{ loc.assigned_employee || '-' }}</td>
+              <td class="px-5 py-3 text-slate-500">{{ loc.branch || '-' }}</td>
               <td class="px-5 py-3">
                 <span
                   class="rounded-full px-2 py-0.5 text-xs font-medium"

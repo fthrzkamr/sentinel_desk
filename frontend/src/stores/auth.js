@@ -26,6 +26,11 @@ export const useAuthStore = defineStore('auth', {
       localStorage.setItem('sd_refresh_token', refresh)
     },
 
+    setAccessToken(access) {
+      this.accessToken = access
+      localStorage.setItem('sd_access_token', access)
+    },
+
     async login(username, password) {
       const { data } = await api.post('/auth/login/', { username, password })
       this.setTokens({ access: data.access, refresh: data.refresh })

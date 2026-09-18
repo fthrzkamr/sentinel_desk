@@ -10,7 +10,6 @@ import threading
 
 import websockets
 
-from screen.overlay import ScreenShareOverlay
 from screen.webrtc_session import WebRTCSession
 
 logger = logging.getLogger("sentineldesk.agent")
@@ -24,7 +23,6 @@ class LiveScreenAgent:
         ws_base = server_url.replace("https://", "wss://").replace("http://", "ws://")
         self.url = f"{ws_base}/ws/agent/{device_id}/signal/?token={device_token}"
         self.session: WebRTCSession | None = None
-        self.overlay = ScreenShareOverlay()
         self._stop_event = threading.Event()
 
     def start_in_background(self) -> threading.Thread:
@@ -87,7 +85,6 @@ class LiveScreenAgent:
             self.session = WebRTCSession()
             answer_sdp = await self.session.handle_offer(message["sdp"])
             await ws.send(json.dumps({"type": "webrtc_answer", "sdp": answer_sdp}))
-            self.overlay.show()
             logger.info("Live screen streaming started")
 
         elif msg_type in ("stop_live_screen", "agent_disconnected"):
@@ -97,5 +94,4 @@ class LiveScreenAgent:
         if self.session:
             await self.session.close()
             self.session = None
-            self.overlay.hide()
             logger.info("Live screen streaming stopped")
