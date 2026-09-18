@@ -39,8 +39,17 @@ class EmployeeSerializer(serializers.ModelSerializer):
 
 class DeviceSerializer(serializers.ModelSerializer):
     company = serializers.StringRelatedField()
+    # Branch/Department's __str__ is the full "Company / Branch[ / Dept]"
+    # chain (see Branch/Department.__str__) — needed as-is for compact
+    # single-line displays elsewhere (device lists, alerts, map popups) that
+    # show org context without a separate Company field nearby. Also expose
+    # the bare .name so a view that already shows Company/Branch/Department
+    # as separate labeled fields (Device Detail's Overview tab) doesn't
+    # repeat the parent chain in every child field.
     branch = serializers.StringRelatedField()
+    branch_name = serializers.CharField(source="branch.name", read_only=True, default=None)
     department = serializers.StringRelatedField()
+    department_name = serializers.CharField(source="department.name", read_only=True, default=None)
     assigned_employee = serializers.StringRelatedField()
     # Plain FK ids alongside the display strings above — the edit form
     # needs these to pre-select the right option in each cascading dropdown,
@@ -79,7 +88,9 @@ class DeviceSerializer(serializers.ModelSerializer):
             "department_id",
             "assigned_employee_id",
             "branch",
+            "branch_name",
             "department",
+            "department_name",
             "assigned_employee",
         ]
         read_only_fields = fields

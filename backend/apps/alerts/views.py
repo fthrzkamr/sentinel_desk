@@ -19,7 +19,9 @@ class AlertListView(generics.ListAPIView):
     serializer_class = AlertSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["status", "severity", "category"]
-    queryset = Alert.objects.select_related("device", "acknowledged_by", "resolved_by").all()
+    queryset = Alert.objects.select_related(
+        "device", "device__assigned_employee", "device__branch", "acknowledged_by", "resolved_by"
+    ).all()
 
     def get_queryset(self):
         queryset = super().get_queryset()

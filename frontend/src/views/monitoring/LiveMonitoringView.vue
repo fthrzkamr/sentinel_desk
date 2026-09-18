@@ -136,10 +136,7 @@ function closeLiveScreen() {
           <div class="min-w-0">
             <p class="truncate font-mono text-xs text-slate-500">{{ device.device_id }}</p>
             <p class="truncate text-sm font-semibold text-slate-800">{{ device.hostname }}</p>
-            <p class="truncate text-xs text-slate-500">
-              {{ device.assigned_employee || 'Belum di-assign' }}
-              <span v-if="device.branch"> · {{ device.branch }}</span>
-            </p>
+            <p class="truncate text-xs text-slate-500">{{ device.assigned_employee || 'Belum di-assign' }}<span v-if="device.branch"> · {{ device.branch }}</span></p>
           </div>
           <StatusBadge :status="displayStatus(device)" />
         </div>
@@ -177,10 +174,7 @@ function closeLiveScreen() {
               {{ liveScreenDevice.hostname }}
               <span class="font-mono text-xs font-normal text-slate-400">({{ liveScreenDevice.device_id }})</span>
             </p>
-            <p class="truncate text-xs text-slate-500">
-              {{ liveScreenDevice.assigned_employee || 'Belum di-assign' }}
-              <span v-if="liveScreenDevice.branch"> · {{ liveScreenDevice.branch }}</span>
-            </p>
+            <p class="truncate text-xs text-slate-500">{{ liveScreenDevice.assigned_employee || 'Belum di-assign' }}<span v-if="liveScreenDevice.branch"> · {{ liveScreenDevice.branch }}</span></p>
           </div>
           <button class="shrink-0 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" @click="closeLiveScreen">
             ✕

@@ -508,8 +508,8 @@ async function confirmToggle() {
 
               <div v-if="!isEditingOrg" class="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
                 <div><dt class="text-xs uppercase text-slate-400">Company</dt><dd>{{ device.company || 'Belum diatur' }}</dd></div>
-                <div><dt class="text-xs uppercase text-slate-400">Branch</dt><dd>{{ device.branch || 'Belum diatur' }}</dd></div>
-                <div><dt class="text-xs uppercase text-slate-400">Department</dt><dd>{{ device.department || 'Belum diatur' }}</dd></div>
+                <div><dt class="text-xs uppercase text-slate-400">Branch</dt><dd>{{ device.branch_name || 'Belum diatur' }}</dd></div>
+                <div><dt class="text-xs uppercase text-slate-400">Department</dt><dd>{{ device.department_name || 'Belum diatur' }}</dd></div>
                 <div><dt class="text-xs uppercase text-slate-400">Assigned Employee</dt><dd>{{ device.assigned_employee || 'Belum diatur' }}</dd></div>
               </div>
 

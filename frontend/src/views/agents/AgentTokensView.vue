@@ -107,6 +107,15 @@ function tokenStatus(token) {
   return { label: 'Valid', cls: 'bg-emerald-100 text-emerald-700' }
 }
 
+// company/branch/department are each already the full "Company / Branch /
+// Department" chain (see their __str__ on the backend) — only the deepest
+// non-empty one is needed, joining all four like the old code did just
+// duplicated every ancestor's name once per descendant level.
+function assignPath(token) {
+  const orgChain = token.department || token.branch || token.company || ''
+  return [orgChain, token.assigned_employee].filter(Boolean).join(' / ') || '-'
+}
+
 // --- Org structure: cascading pickers for the token form ---
 
 const companies = ref([])
@@ -635,7 +644,7 @@ async function confirmDelete() {
             <td class="px-4 py-3 font-mono text-xs">{{ token.token_prefix }}...</td>
             <td class="px-4 py-3">{{ token.label || '-' }}</td>
             <td class="px-4 py-3 text-xs text-slate-500">
-              {{ [token.company, token.branch, token.department, token.assigned_employee].filter(Boolean).join(' / ') || '-' }}
+              {{ assignPath(token) }}
             </td>
             <td class="px-4 py-3">{{ token.created_by || '-' }}</td>
             <td class="px-4 py-3">{{ new Date(token.expires_at).toLocaleString() }}</td>

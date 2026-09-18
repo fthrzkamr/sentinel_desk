@@ -121,6 +121,7 @@ async function handleResolve(alert) {
         <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
           <tr>
             <th class="px-4 py-3">Device</th>
+            <th class="px-4 py-3">Karyawan</th>
             <th class="px-4 py-3">Kategori</th>
             <th class="px-4 py-3">Severity</th>
             <th class="px-4 py-3">Pesan</th>
@@ -131,16 +132,19 @@ async function handleResolve(alert) {
         </thead>
         <tbody class="divide-y divide-slate-100">
           <tr v-if="isLoading">
-            <td colspan="7" class="px-4 py-8 text-center text-slate-400">Memuat data...</td>
+            <td colspan="8" class="px-4 py-8 text-center text-slate-400">Memuat data...</td>
           </tr>
           <tr v-else-if="errorMessage">
-            <td colspan="7" class="px-4 py-8 text-center text-red-500">{{ errorMessage }}</td>
+            <td colspan="8" class="px-4 py-8 text-center text-red-500">{{ errorMessage }}</td>
           </tr>
           <tr v-else-if="rows.length === 0">
-            <td colspan="7" class="px-4 py-8 text-center text-slate-400">Tidak ada alert.</td>
+            <td colspan="8" class="px-4 py-8 text-center text-slate-400">Tidak ada alert.</td>
           </tr>
           <tr v-for="alert in rows" v-else :key="alert.id" class="hover:bg-slate-50">
             <td class="px-4 py-3 font-mono text-xs text-slate-600">{{ alert.device_id }}</td>
+            <td class="px-4 py-3 text-slate-600">
+              {{ alert.assigned_employee || '-' }}
+            </td>
             <td class="px-4 py-3 text-slate-600">{{ alert.category }}</td>
             <td class="px-4 py-3">
               <span class="rounded-full px-2.5 py-0.5 text-xs font-semibold" :class="SEVERITY_STYLE[alert.severity]">
