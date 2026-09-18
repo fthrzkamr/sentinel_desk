@@ -15,6 +15,7 @@ PERMISSIONS = [
     ("alert.manage", "Acknowledge and resolve alerts"),
     ("agent.manage", "Manage enrollment tokens and agent versions"),
     ("audit.view", "View audit logs"),
+    ("activity.view", "View app usage, browsing history, and file activity logs"),
     ("user.manage", "Manage users, roles and permissions"),
     ("settings.manage", "Tune system thresholds (CPU/RAM/Disk/Battery, offline detection, retention)"),
 ]

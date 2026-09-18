@@ -25,6 +25,11 @@ class SystemSettings(models.Model):
     battery_critical_percent = models.FloatField(default=10)
     device_offline_threshold_seconds = models.PositiveIntegerField(default=60)
     device_metric_retention_days = models.PositiveIntegerField(default=7)
+    # App usage/browsing history/file activity are far lower-volume than raw
+    # metric samples (one row per app-per-day, or per real visit/file event —
+    # not one per heartbeat), so a longer default retention than metrics is
+    # fine without the table growing out of control.
+    activity_retention_days = models.PositiveIntegerField(default=180)
 
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -58,6 +63,7 @@ class SystemSettings(models.Model):
                 "battery_critical_percent": settings.BATTERY_CRITICAL_PERCENT,
                 "device_offline_threshold_seconds": settings.DEVICE_OFFLINE_THRESHOLD_SECONDS,
                 "device_metric_retention_days": settings.DEVICE_METRIC_RETENTION_DAYS,
+                "activity_retention_days": settings.ACTIVITY_RETENTION_DAYS,
             },
         )
         cache.set(CACHE_KEY, obj, timeout=CACHE_TTL_SECONDS)

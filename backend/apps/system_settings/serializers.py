@@ -24,6 +24,7 @@ class SystemSettingsSerializer(serializers.ModelSerializer):
             "battery_critical_percent",
             "device_offline_threshold_seconds",
             "device_metric_retention_days",
+            "activity_retention_days",
             "updated_at",
         ]
         read_only_fields = ["updated_at"]

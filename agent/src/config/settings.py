@@ -30,13 +30,25 @@ class AgentConfig:
     enrollment_token: str | None
     monitor_interval: int
     screen_monitor_enabled: bool
+    usb_monitor_enabled: bool
+    app_usage_monitor_enabled: bool
+    browser_history_monitor_enabled: bool
+    file_activity_monitor_enabled: bool
 
     @classmethod
     def load(cls) -> "AgentConfig":
         server_url = os.environ.get("SERVER_URL", "http://localhost:8000")
+
+        def _flag(name: str) -> bool:
+            return os.environ.get(name, "false").lower() == "true"
+
         return cls(
             server_url=server_url.rstrip("/"),
             enrollment_token=os.environ.get("ENROLLMENT_TOKEN") or None,
             monitor_interval=int(os.environ.get("MONITOR_INTERVAL", "15")),
-            screen_monitor_enabled=os.environ.get("SCREEN_MONITOR_ENABLED", "false").lower() == "true",
+            screen_monitor_enabled=_flag("SCREEN_MONITOR_ENABLED"),
+            usb_monitor_enabled=_flag("USB_MONITOR_ENABLED"),
+            app_usage_monitor_enabled=_flag("APP_USAGE_MONITOR_ENABLED"),
+            browser_history_monitor_enabled=_flag("BROWSER_HISTORY_MONITOR_ENABLED"),
+            file_activity_monitor_enabled=_flag("FILE_ACTIVITY_MONITOR_ENABLED"),
         )

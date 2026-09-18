@@ -120,3 +120,18 @@ def trigger_connectivity_alert(device):
 
 def resolve_connectivity_alert(device):
     return _auto_resolve(device, Alert.Category.CONNECTIVITY, "device_back_online")
+
+
+def trigger_usb_alert(device, *, label, drive_letter, serial):
+    alert, created = _trigger(
+        device,
+        Alert.Category.USB,
+        Alert.Severity.WARNING,
+        f"Media eksternal terhubung: {label or drive_letter} ({drive_letter})",
+        {"label": label, "drive_letter": drive_letter, "serial": serial},
+    )
+    return alert if created else None
+
+
+def resolve_usb_alert(device):
+    return _auto_resolve(device, Alert.Category.USB, "media_removed")

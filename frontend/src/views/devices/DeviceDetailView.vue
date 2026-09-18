@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
@@ -8,6 +8,7 @@ import LiveScreenPanel from '@/components/LiveScreenPanel.vue'
 import MetricTrendChart from '@/components/MetricTrendChart.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import UsageBar from '@/components/UsageBar.vue'
+import { listAppUsage, listBrowsingHistory, listFileActivity } from '@/services/activity'
 import { listAuditLogs } from '@/services/audit'
 import { disableDevice, enableDevice, getDevice, updateDeviceOrgAssignment } from '@/services/devices'
 import { getDeviceLocationHistory } from '@/services/locations'
@@ -38,6 +39,9 @@ const tabs = computed(() => [
   { key: 'software', label: 'Software', available: true },
   { key: 'location', label: 'Location', available: true },
   { key: 'live-screen', label: 'Live Screen', available: auth.hasPermission('monitoring.live_screen') },
+  { key: 'app-usage', label: 'App Usage', available: auth.hasPermission('activity.view') },
+  { key: 'browsing-history', label: 'Browsing History', available: auth.hasPermission('activity.view') },
+  { key: 'file-activity', label: 'File Activity', available: auth.hasPermission('activity.view') },
   { key: 'audit', label: 'Audit', available: auth.hasPermission('audit.view') },
 ])
 
@@ -305,12 +309,105 @@ function formatAuditMetadata(metadata) {
     .join(', ')
 }
 
+const appUsage = ref([])
+const isAppUsageLoading = ref(false)
+const appUsageLoaded = ref(false)
+
+async function fetchAppUsage() {
+  isAppUsageLoading.value = true
+  try {
+    const { data } = await listAppUsage({
+      device__device_id: route.params.deviceId,
+      ordering: '-date,-duration_seconds',
+      page_size: 100,
+    })
+    appUsage.value = data.results
+    appUsageLoaded.value = true
+  } catch {
+    appUsage.value = []
+  } finally {
+    isAppUsageLoading.value = false
+  }
+}
+
+function formatDuration(seconds) {
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.round((seconds % 3600) / 60)
+  if (hours > 0) return `${hours}j ${minutes}m`
+  return `${minutes}m`
+}
+
+const browsingHistory = ref([])
+const isBrowsingHistoryLoading = ref(false)
+const browsingHistoryLoaded = ref(false)
+
+async function fetchBrowsingHistory() {
+  isBrowsingHistoryLoading.value = true
+  try {
+    const { data } = await listBrowsingHistory({ device__device_id: route.params.deviceId, page_size: 100 })
+    browsingHistory.value = data.results
+    browsingHistoryLoaded.value = true
+  } catch {
+    browsingHistory.value = []
+  } finally {
+    isBrowsingHistoryLoading.value = false
+  }
+}
+
+const fileActivity = ref([])
+const isFileActivityLoading = ref(false)
+const fileActivityLoaded = ref(false)
+
+async function fetchFileActivity() {
+  isFileActivityLoading.value = true
+  try {
+    const { data } = await listFileActivity({ device__device_id: route.params.deviceId, page_size: 100 })
+    fileActivity.value = data.results
+    fileActivityLoaded.value = true
+  } catch {
+    fileActivity.value = []
+  } finally {
+    isFileActivityLoading.value = false
+  }
+}
+
+// These three sync from the agent every 2-10 minutes, not live — auto-polling
+// the list every 20s while the tab is open means new data shows up on its own
+// instead of looking "stuck" until the admin clicks away and back.
+const ACTIVITY_AUTO_REFRESH_INTERVAL_MS = 20000
+let activityAutoRefreshTimer = null
+
+function stopActivityAutoRefresh() {
+  clearInterval(activityAutoRefreshTimer)
+  activityAutoRefreshTimer = null
+}
+
+function startActivityAutoRefresh(fetchFn) {
+  stopActivityAutoRefresh()
+  activityAutoRefreshTimer = setInterval(fetchFn, ACTIVITY_AUTO_REFRESH_INTERVAL_MS)
+}
+
 watch(activeTab, (tab) => {
   if (tab === 'software' && !softwareLoaded.value) fetchSoftware()
   if (tab === 'location' && !locationLoaded.value) fetchLocationHistory()
   if (tab === 'metrics' && !historyLoaded.value) fetchMetricHistory()
   if (tab === 'audit' && !auditLoaded.value) fetchAuditLogs()
+
+  if (tab === 'app-usage') {
+    if (!appUsageLoaded.value) fetchAppUsage()
+    startActivityAutoRefresh(fetchAppUsage)
+  } else if (tab === 'browsing-history') {
+    if (!browsingHistoryLoaded.value) fetchBrowsingHistory()
+    startActivityAutoRefresh(fetchBrowsingHistory)
+  } else if (tab === 'file-activity') {
+    if (!fileActivityLoaded.value) fetchFileActivity()
+    startActivityAutoRefresh(fetchFileActivity)
+  } else {
+    stopActivityAutoRefresh()
+  }
 })
+
+onBeforeUnmount(stopActivityAutoRefresh)
 
 onMounted(() => {
   fetchDevice()
@@ -653,6 +750,147 @@ async function confirmToggle() {
 
           <div v-else-if="activeTab === 'live-screen'">
             <LiveScreenPanel :key="device.device_id" :device-id="device.device_id" />
+          </div>
+
+          <div v-else-if="activeTab === 'app-usage'" class="space-y-3">
+            <div class="flex items-center justify-between">
+              <p class="text-xs text-slate-400">
+                Total waktu tiap aplikasi digunakan di foreground, per hari. Agent sync tiap 5 menit — halaman ini
+                otomatis refresh tiap 20 detik.
+              </p>
+              <button
+                class="shrink-0 rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                @click="fetchAppUsage"
+              >
+                Refresh
+              </button>
+            </div>
+            <div class="overflow-x-auto rounded-lg border border-slate-100">
+              <table class="min-w-full divide-y divide-slate-100 text-sm">
+                <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th class="px-4 py-2">Tanggal</th>
+                    <th class="px-4 py-2">Aplikasi</th>
+                    <th class="px-4 py-2">Judul Terakhir</th>
+                    <th class="px-4 py-2">Durasi</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  <tr v-if="isAppUsageLoading">
+                    <td colspan="4" class="px-4 py-6 text-center text-slate-400">Memuat data...</td>
+                  </tr>
+                  <tr v-else-if="appUsage.length === 0">
+                    <td colspan="4" class="px-4 py-6 text-center text-slate-400">
+                      Belum ada data. Aktifkan APP_USAGE_MONITOR_ENABLED di .env agent untuk device ini.
+                    </td>
+                  </tr>
+                  <tr v-for="row in appUsage" v-else :key="row.id" class="hover:bg-slate-50">
+                    <td class="px-4 py-2 whitespace-nowrap text-slate-500">{{ row.date }}</td>
+                    <td class="px-4 py-2 font-medium text-slate-700">{{ row.app_name }}</td>
+                    <td class="px-4 py-2 text-xs text-slate-500">{{ row.window_title || '-' }}</td>
+                    <td class="px-4 py-2 text-slate-600">{{ formatDuration(row.duration_seconds) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div v-else-if="activeTab === 'browsing-history'" class="space-y-3">
+            <div class="flex items-center justify-between">
+              <p class="text-xs text-slate-400">
+                Riwayat situs yang dikunjungi, disinkron dari Chrome/Edge. Agent sync tiap 1 menit — halaman ini
+                otomatis refresh tiap 20 detik.
+              </p>
+              <button
+                class="shrink-0 rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                @click="fetchBrowsingHistory"
+              >
+                Refresh
+              </button>
+            </div>
+            <div class="overflow-x-auto rounded-lg border border-slate-100">
+              <table class="min-w-full divide-y divide-slate-100 text-sm">
+                <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th class="px-4 py-2">Waktu</th>
+                    <th class="px-4 py-2">Browser</th>
+                    <th class="px-4 py-2">Judul</th>
+                    <th class="px-4 py-2">URL</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  <tr v-if="isBrowsingHistoryLoading">
+                    <td colspan="4" class="px-4 py-6 text-center text-slate-400">Memuat data...</td>
+                  </tr>
+                  <tr v-else-if="browsingHistory.length === 0">
+                    <td colspan="4" class="px-4 py-6 text-center text-slate-400">
+                      Belum ada data. Aktifkan BROWSER_HISTORY_MONITOR_ENABLED di .env agent untuk device ini.
+                    </td>
+                  </tr>
+                  <tr v-for="row in browsingHistory" v-else :key="row.id" class="hover:bg-slate-50">
+                    <td class="px-4 py-2 whitespace-nowrap text-slate-500">{{ new Date(row.visited_at).toLocaleString() }}</td>
+                    <td class="px-4 py-2 text-slate-600">{{ row.browser }}</td>
+                    <td class="px-4 py-2 max-w-xs truncate" :title="row.title">{{ row.title || '-' }}</td>
+                    <td class="px-4 py-2 max-w-xs truncate font-mono text-xs text-brand-700" :title="row.url">
+                      <a :href="row.url" target="_blank" rel="noopener noreferrer" class="hover:underline">{{ row.url }}</a>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div v-else-if="activeTab === 'file-activity'" class="space-y-3">
+            <div class="flex items-center justify-between">
+              <p class="text-xs text-slate-400">
+                Aktivitas file di folder Desktop/Documents/Downloads (dibuat, diubah, dihapus). Agent sync tiap 2
+                menit — halaman ini otomatis refresh tiap 20 detik.
+              </p>
+              <button
+                class="shrink-0 rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                @click="fetchFileActivity"
+              >
+                Refresh
+              </button>
+            </div>
+            <div class="overflow-x-auto rounded-lg border border-slate-100">
+              <table class="min-w-full divide-y divide-slate-100 text-sm">
+                <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th class="px-4 py-2">Waktu</th>
+                    <th class="px-4 py-2">Aksi</th>
+                    <th class="px-4 py-2">Path</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  <tr v-if="isFileActivityLoading">
+                    <td colspan="3" class="px-4 py-6 text-center text-slate-400">Memuat data...</td>
+                  </tr>
+                  <tr v-else-if="fileActivity.length === 0">
+                    <td colspan="3" class="px-4 py-6 text-center text-slate-400">
+                      Belum ada data. Aktifkan FILE_ACTIVITY_MONITOR_ENABLED di .env agent untuk device ini.
+                    </td>
+                  </tr>
+                  <tr v-for="row in fileActivity" v-else :key="row.id" class="hover:bg-slate-50">
+                    <td class="px-4 py-2 whitespace-nowrap text-slate-500">{{ new Date(row.occurred_at).toLocaleString() }}</td>
+                    <td class="px-4 py-2">
+                      <span
+                        class="rounded-full px-2 py-0.5 text-xs font-medium"
+                        :class="{
+                          'bg-emerald-100 text-emerald-700': row.event_type === 'CREATED',
+                          'bg-amber-100 text-amber-700': row.event_type === 'MODIFIED',
+                          'bg-red-100 text-red-700': row.event_type === 'DELETED',
+                          'bg-blue-100 text-blue-700': row.event_type === 'MOVED',
+                        }"
+                      >
+                        {{ row.event_type }}
+                      </span>
+                    </td>
+                    <td class="px-4 py-2 font-mono text-xs text-slate-600">{{ row.path }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div v-else-if="activeTab === 'audit'" class="space-y-3">

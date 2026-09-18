@@ -14,6 +14,7 @@ const form = reactive({
   battery_critical_percent: null,
   device_offline_threshold_seconds: null,
   device_metric_retention_days: null,
+  activity_retention_days: null,
 })
 
 const isLoading = ref(true)
@@ -150,10 +151,19 @@ function fieldError(key) {
 
       <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-900/5">
         <h2 class="text-sm font-semibold text-slate-700">Retensi Data</h2>
-        <div class="mt-3 max-w-xs">
-          <label class="mb-1 block text-xs font-medium text-slate-600">Simpan histori metric selama (hari)</label>
-          <input v-model.number="form.device_metric_retention_days" type="number" min="1" class="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500" />
-          <p v-if="fieldError('device_metric_retention_days')" class="mt-1 text-xs text-red-600">{{ fieldError('device_metric_retention_days') }}</p>
+        <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label class="mb-1 block text-xs font-medium text-slate-600">Simpan histori metric selama (hari)</label>
+            <input v-model.number="form.device_metric_retention_days" type="number" min="1" class="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+            <p v-if="fieldError('device_metric_retention_days')" class="mt-1 text-xs text-red-600">{{ fieldError('device_metric_retention_days') }}</p>
+          </div>
+          <div>
+            <label class="mb-1 block text-xs font-medium text-slate-600">
+              Simpan App Usage/Browsing History/File Activity selama (hari)
+            </label>
+            <input v-model.number="form.activity_retention_days" type="number" min="1" class="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+            <p v-if="fieldError('activity_retention_days')" class="mt-1 text-xs text-red-600">{{ fieldError('activity_retention_days') }}</p>
+          </div>
         </div>
       </div>
 

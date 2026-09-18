@@ -45,6 +45,7 @@ LOCAL_APPS = [
     "apps.audit",
     "apps.system_settings",
     "apps.livescreen",
+    "apps.device_activity",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -149,6 +150,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.monitoring.tasks.prune_old_metrics",
         "schedule": 3600.0,
     },
+    "prune-old-activity": {
+        "task": "apps.device_activity.tasks.prune_old_activity",
+        "schedule": 3600.0,
+    },
 }
 
 # --- Django REST Framework ---
@@ -203,6 +208,7 @@ DEVICE_OFFLINE_THRESHOLD_SECONDS = env.int("DEVICE_OFFLINE_THRESHOLD_SECONDS", d
 DEFAULT_MONITOR_INTERVAL_SECONDS = env.int("DEFAULT_MONITOR_INTERVAL_SECONDS", default=15)
 ENROLLMENT_TOKEN_TTL_MINUTES = env.int("ENROLLMENT_TOKEN_TTL_MINUTES", default=60)
 DEVICE_METRIC_RETENTION_DAYS = env.int("DEVICE_METRIC_RETENTION_DAYS", default=7)
+ACTIVITY_RETENTION_DAYS = env.int("ACTIVITY_RETENTION_DAYS", default=180)
 
 # Device status thresholds — CRITICAL takes priority over WARNING when both match.
 CPU_WARNING_PERCENT = env.float("CPU_WARNING_PERCENT", default=80)

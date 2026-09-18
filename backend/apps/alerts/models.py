@@ -17,6 +17,7 @@ class Alert(models.Model):
         DISK = "DISK", "Disk Usage"
         BATTERY = "BATTERY", "Battery Level"
         CONNECTIVITY = "CONNECTIVITY", "Connectivity"
+        USB = "USB", "USB/Removable Media"
 
     class Severity(models.TextChoices):
         WARNING = "WARNING", "Warning"
