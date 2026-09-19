@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Branch, Company, Department, Device, Employee, EnrollmentToken
+from .models import AgentRelease, Branch, Company, Department, Device, Employee, EnrollmentToken
 
 
 class CompanySerializer(serializers.ModelSerializer):
@@ -179,3 +179,22 @@ class EnrollRequestSerializer(serializers.Serializer):
 class HeartbeatSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150, required=False, allow_blank=True)
     agent_version = serializers.CharField(max_length=30, required=False, allow_blank=True)
+
+
+class AgentReleaseSerializer(serializers.ModelSerializer):
+    uploaded_by = serializers.StringRelatedField()
+
+    class Meta:
+        model = AgentRelease
+        fields = [
+            "id",
+            "version",
+            "exe_file",
+            "sha256",
+            "file_size",
+            "is_active",
+            "notes",
+            "uploaded_by",
+            "released_at",
+        ]
+        read_only_fields = ["id", "sha256", "file_size", "uploaded_by", "released_at"]

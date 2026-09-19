@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Branch, Company, Department, Device, DeviceCredential, Employee, EnrollmentToken
+from .models import AgentRelease, Branch, Company, Department, Device, DeviceCredential, Employee, EnrollmentToken
 
 
 @admin.register(Company)
@@ -45,3 +45,10 @@ class EnrollmentTokenAdmin(admin.ModelAdmin):
     list_display = ("token_prefix", "label", "created_by", "created_at", "expires_at", "used_at", "revoked")
     list_filter = ("revoked",)
     readonly_fields = ("token_hash", "token_prefix")
+
+
+@admin.register(AgentRelease)
+class AgentReleaseAdmin(admin.ModelAdmin):
+    list_display = ("version", "is_active", "file_size", "uploaded_by", "released_at")
+    list_filter = ("is_active",)
+    readonly_fields = ("sha256", "file_size", "released_at")

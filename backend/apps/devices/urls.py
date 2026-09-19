@@ -1,8 +1,12 @@
 from django.urls import path
 
 from .views import (
+    AgentDownloadView,
     AgentEnrollView,
     AgentHeartbeatView,
+    AgentReleaseDetailView,
+    AgentReleaseListCreateView,
+    AgentVersionView,
     BranchDetailView,
     BranchListCreateView,
     CompanyDetailView,
@@ -47,4 +51,9 @@ urlpatterns = [
     # Agent-facing
     path("agent/enroll/", AgentEnrollView.as_view(), name="agent-enroll"),
     path("agent/heartbeat/", AgentHeartbeatView.as_view(), name="agent-heartbeat"),
+    path("agent/version/", AgentVersionView.as_view(), name="agent-version"),
+    path("agent/download/", AgentDownloadView.as_view(), name="agent-download"),
+    # Agent release management (admin)
+    path("agent-releases/", AgentReleaseListCreateView.as_view(), name="agent-release-list-create"),
+    path("agent-releases/<int:pk>/", AgentReleaseDetailView.as_view(), name="agent-release-detail"),
 ]

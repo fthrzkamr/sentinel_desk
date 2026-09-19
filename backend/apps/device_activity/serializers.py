@@ -49,6 +49,9 @@ class FileActivityItemSerializer(serializers.Serializer):
     event_type = serializers.ChoiceField(choices=FileActivityEvent.EventType.choices)
     path = serializers.CharField(max_length=1000)
     destination_path = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+    source = serializers.ChoiceField(
+        choices=FileActivityEvent.Source.choices, required=False, default=FileActivityEvent.Source.LOCAL
+    )
     occurred_at = serializers.DateTimeField()
 
 
@@ -62,7 +65,7 @@ class FileActivitySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = FileActivityEvent
-        fields = ["id", "device_id", "hostname", "event_type", "path", "destination_path", "occurred_at"]
+        fields = ["id", "device_id", "hostname", "event_type", "path", "destination_path", "source", "occurred_at"]
         read_only_fields = fields
 
 

@@ -18,6 +18,8 @@ class Alert(models.Model):
         BATTERY = "BATTERY", "Battery Level"
         CONNECTIVITY = "CONNECTIVITY", "Connectivity"
         USB = "USB", "USB/Removable Media"
+        OUT_OF_HOURS = "OUT_OF_HOURS", "Activity Outside Work Hours"
+        DATA_EXFIL = "DATA_EXFIL", "Possible Data Exfiltration"
 
     class Severity(models.TextChoices):
         WARNING = "WARNING", "Warning"

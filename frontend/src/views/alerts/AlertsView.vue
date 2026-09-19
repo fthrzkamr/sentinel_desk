@@ -23,7 +23,7 @@ const actioningId = ref(null)
 
 const STATUS_OPTIONS = ['OPEN', 'ACKNOWLEDGED', 'RESOLVED']
 const SEVERITY_OPTIONS = ['WARNING', 'CRITICAL']
-const CATEGORY_OPTIONS = ['CPU', 'RAM', 'DISK', 'BATTERY', 'CONNECTIVITY', 'USB']
+const CATEGORY_OPTIONS = ['CPU', 'RAM', 'DISK', 'BATTERY', 'CONNECTIVITY', 'USB', 'OUT_OF_HOURS', 'DATA_EXFIL']
 
 const SEVERITY_STYLE = {
   WARNING: 'bg-amber-100 text-amber-700',

@@ -27,14 +27,16 @@ from networking.client import (
 from screen.signaling_client import LiveScreenAgent
 from services import autostart
 from services.secure_storage import load_credentials, save_credentials
+from services.updater import UpdateError, apply_update_and_restart, check_for_update, download_and_verify
 
-AGENT_VERSION = "0.1.0-dev"
+AGENT_VERSION = "0.3.0"
 MAX_BACKOFF_SECONDS = 300
 SOFTWARE_SYNC_INTERVAL_SECONDS = 3600  # software list changes rarely — no need to resend every cycle
 LOCATION_SYNC_INTERVAL_SECONDS = 900  # 15 min — frequent enough to track a moving laptop, not spammy
 APP_USAGE_SYNC_INTERVAL_SECONDS = 300
 BROWSER_HISTORY_SYNC_INTERVAL_SECONDS = 60
 FILE_ACTIVITY_SYNC_INTERVAL_SECONDS = 120
+UPDATE_CHECK_INTERVAL_SECONDS = 3600  # hourly — a new build isn't urgent enough to check more often
 
 LOG_DIR = AGENT_DIR / "logs"
 LOG_DIR.mkdir(exist_ok=True)
@@ -87,14 +89,24 @@ def sync_location(config: AgentConfig, device_id: str, device_token: str):
         logger.info("Location synced - source=%s (OS location unavailable)", result.get("source", "IP"))
 
 
-def poll_usb(config: AgentConfig, device_id: str, device_token: str, watcher: UsbWatcher):
+def poll_usb(
+    config: AgentConfig,
+    device_id: str,
+    device_token: str,
+    watcher: UsbWatcher,
+    file_activity_watcher: FileActivityWatcher | None,
+):
     connected, disconnected = watcher.poll()
     for event in connected:
         send_usb_event(config, device_id, device_token, {"event": "connected", **event})
         logger.info("USB connected - %s (%s)", event["label"] or event["drive_letter"], event["drive_letter"])
+        if file_activity_watcher:
+            file_activity_watcher.track_removable(event["drive_letter"])
     for drive_letter in disconnected:
         send_usb_event(config, device_id, device_token, {"event": "disconnected", "drive_letter": drive_letter})
         logger.info("USB disconnected - %s", drive_letter)
+        if file_activity_watcher:
+            file_activity_watcher.untrack_removable(drive_letter)
 
 
 def sync_app_usage(config: AgentConfig, device_id: str, device_token: str, tracker: AppUsageTracker):
@@ -116,6 +128,23 @@ def sync_file_activity(config: AgentConfig, device_id: str, device_token: str, w
     if items:
         send_file_activity(config, device_id, device_token, items)
         logger.info("File activity synced - %s event(s)", len(items))
+
+
+def check_and_apply_update(config: AgentConfig, device_id: str, device_token: str):
+    update_info = check_for_update(config, device_id, device_token, AGENT_VERSION)
+    if not update_info:
+        return
+
+    logger.info("New agent version available: %s (current: %s)", update_info["version"], AGENT_VERSION)
+    try:
+        new_exe_path = download_and_verify(
+            config, device_id, device_token, update_info["sha256"], update_info["file_size"]
+        )
+    except UpdateError as exc:
+        logger.warning("Update download failed verification, staying on current version (%s)", exc)
+        return
+
+    apply_update_and_restart(new_exe_path)  # exits the process on success; returns only if not a packaged .exe
 
 
 def run():
@@ -171,6 +200,7 @@ def run():
     last_app_usage_sync = time.monotonic()
     last_browser_history_sync = time.monotonic()
     last_file_activity_sync = time.monotonic()
+    last_update_check = time.monotonic()
 
     backoff = 1
     while not _shutdown_requested:
@@ -209,7 +239,7 @@ def run():
 
         if usb_watcher:
             try:
-                poll_usb(config, device_id, device_token, usb_watcher)
+                poll_usb(config, device_id, device_token, usb_watcher, file_activity_watcher)
             except Exception as exc:  # noqa: BLE001 - don't let this break the metrics loop
                 logger.warning("USB polling failed (%s)", exc)
 
@@ -235,6 +265,13 @@ def run():
             except Exception as exc:  # noqa: BLE001 - don't let this break the metrics loop
                 logger.warning("File activity sync failed (%s), will retry next interval", exc)
             last_file_activity_sync = time.monotonic()
+
+        if time.monotonic() - last_update_check >= UPDATE_CHECK_INTERVAL_SECONDS:
+            try:
+                check_and_apply_update(config, device_id, device_token)  # exits the process if it applies an update
+            except Exception as exc:  # noqa: BLE001 - don't let this break the metrics loop
+                logger.warning("Update check failed (%s), will retry next interval", exc)
+            last_update_check = time.monotonic()
 
         time.sleep(config.monitor_interval)
 

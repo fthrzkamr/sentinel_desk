@@ -103,6 +103,11 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# Only used to store uploaded agent .exe releases — served through an
+# authenticated view (AgentDownloadView), never directly via MEDIA_URL.
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # --- Redis / Channels ---
@@ -209,6 +214,8 @@ DEFAULT_MONITOR_INTERVAL_SECONDS = env.int("DEFAULT_MONITOR_INTERVAL_SECONDS", d
 ENROLLMENT_TOKEN_TTL_MINUTES = env.int("ENROLLMENT_TOKEN_TTL_MINUTES", default=60)
 DEVICE_METRIC_RETENTION_DAYS = env.int("DEVICE_METRIC_RETENTION_DAYS", default=7)
 ACTIVITY_RETENTION_DAYS = env.int("ACTIVITY_RETENTION_DAYS", default=180)
+WORK_HOURS_START = env.int("WORK_HOURS_START", default=8)
+WORK_HOURS_END = env.int("WORK_HOURS_END", default=18)
 
 # Device status thresholds — CRITICAL takes priority over WARNING when both match.
 CPU_WARNING_PERCENT = env.float("CPU_WARNING_PERCENT", default=80)

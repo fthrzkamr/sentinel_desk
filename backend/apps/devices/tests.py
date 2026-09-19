@@ -1,12 +1,14 @@
+import hashlib
 import re
 
 import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import Permission, Role, User
 from apps.audit.models import AuditLog
-from apps.devices.models import Branch, Company, Department, Device, DeviceCredential, Employee, EnrollmentToken
+from apps.devices.models import AgentRelease, Branch, Company, Department, Device, DeviceCredential, Employee, EnrollmentToken
 
 
 @pytest.fixture
@@ -361,3 +363,103 @@ def test_device_org_assignment_can_be_cleared(org_manager_user, enrollment_token
     assert clear_response.status_code == 200
     device = Device.objects.get(device_id=device_id)
     assert device.company_id is None
+
+
+# --- Agent self-update ---
+
+
+def _enrolled_device_credentials(raw_token):
+    resp = APIClient().post("/api/agent/enroll/", {"token": raw_token, "hostname": "LAPTOP-UPDATE"}, format="json")
+    return resp.data["device_id"], resp.data["device_token"]
+
+
+def _agent_get(device_id, device_token, path):
+    return APIClient().get(path, HTTP_X_DEVICE_ID=device_id, HTTP_AUTHORIZATION=f"DeviceToken {device_token}")
+
+
+@pytest.mark.django_db
+def test_uploading_release_computes_sha256_and_only_one_stays_active(admin_client):
+    content_a = b"fake-exe-bytes-v1"
+    resp_a = admin_client.post(
+        "/api/agent-releases/",
+        {"version": "0.2.0", "is_active": True, "exe_file": SimpleUploadedFile("agent.exe", content_a)},
+        format="multipart",
+    )
+    assert resp_a.status_code == 201
+    assert resp_a.data["sha256"] == hashlib.sha256(content_a).hexdigest()
+    assert resp_a.data["file_size"] == len(content_a)
+
+    content_b = b"fake-exe-bytes-v2-longer"
+    resp_b = admin_client.post(
+        "/api/agent-releases/",
+        {"version": "0.3.0", "is_active": True, "exe_file": SimpleUploadedFile("agent.exe", content_b)},
+        format="multipart",
+    )
+    assert resp_b.status_code == 201
+
+    release_a = AgentRelease.objects.get(version="0.2.0")
+    release_b = AgentRelease.objects.get(version="0.3.0")
+    assert release_a.is_active is False
+    assert release_b.is_active is True
+
+
+@pytest.mark.django_db
+def test_release_upload_requires_agent_manage_permission():
+    response = APIClient().post(
+        "/api/agent-releases/",
+        {"version": "0.2.0", "exe_file": SimpleUploadedFile("agent.exe", b"x")},
+        format="multipart",
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_agent_version_check_returns_active_release(admin_client, enrollment_token):
+    _, raw_token = enrollment_token
+    device_id, device_token = _enrolled_device_credentials(raw_token)
+
+    content = b"fake-exe-bytes"
+    admin_client.post(
+        "/api/agent-releases/",
+        {"version": "0.5.0", "is_active": True, "exe_file": SimpleUploadedFile("agent.exe", content)},
+        format="multipart",
+    )
+
+    response = _agent_get(device_id, device_token, "/api/agent/version/")
+    assert response.status_code == 200
+    assert response.data["version"] == "0.5.0"
+    assert response.data["sha256"] == hashlib.sha256(content).hexdigest()
+    assert response.data["file_size"] == len(content)
+
+
+@pytest.mark.django_db
+def test_agent_version_check_404_when_no_active_release(enrollment_token):
+    _, raw_token = enrollment_token
+    device_id, device_token = _enrolled_device_credentials(raw_token)
+
+    response = _agent_get(device_id, device_token, "/api/agent/version/")
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_agent_download_streams_exact_bytes_and_is_logged(admin_client, enrollment_token):
+    _, raw_token = enrollment_token
+    device_id, device_token = _enrolled_device_credentials(raw_token)
+
+    content = b"fake-exe-bytes-for-download-test"
+    admin_client.post(
+        "/api/agent-releases/",
+        {"version": "0.6.0", "is_active": True, "exe_file": SimpleUploadedFile("agent.exe", content)},
+        format="multipart",
+    )
+
+    response = _agent_get(device_id, device_token, "/api/agent/download/")
+    assert response.status_code == 200
+    assert b"".join(response.streaming_content) == content
+    assert AuditLog.objects.filter(action="agent.update_downloaded", device_id=device_id).exists()
+
+
+@pytest.mark.django_db
+def test_agent_endpoints_reject_missing_device_auth():
+    assert APIClient().get("/api/agent/version/").status_code == 401
+    assert APIClient().get("/api/agent/download/").status_code == 401

@@ -135,3 +135,39 @@ def trigger_usb_alert(device, *, label, drive_letter, serial):
 
 def resolve_usb_alert(device):
     return _auto_resolve(device, Alert.Category.USB, "media_removed")
+
+
+def check_out_of_hours_activity(device, activity_timestamp, description: str):
+    """Flags app usage/browsing/file activity whose local clock hour falls
+    outside SystemSettings.work_hours_start/end. One open alert per device
+    is reused (like every other alert here) — each new out-of-hours event
+    just refreshes its message/metadata to the latest occurrence rather
+    than spawning a duplicate for every single event in a burst."""
+    config = SystemSettings.get_solo()
+    local_time = timezone.localtime(activity_timestamp)
+    hour = local_time.hour
+
+    start, end = config.work_hours_start, config.work_hours_end
+    within_hours = start <= hour < end if start < end else (hour >= start or hour < end)
+    if within_hours:
+        return None
+
+    alert, created = _trigger(
+        device,
+        Alert.Category.OUT_OF_HOURS,
+        Alert.Severity.WARNING,
+        f"Aktivitas di luar jam kerja ({local_time.strftime('%H:%M')}): {description}",
+        {"detected_at": local_time.isoformat(), "description": description},
+    )
+    return alert if created else None
+
+
+def trigger_data_exfil_alert(device, *, drive_letter, event_type, path):
+    alert, created = _trigger(
+        device,
+        Alert.Category.DATA_EXFIL,
+        Alert.Severity.CRITICAL,
+        f"Kemungkinan kebocoran data: file {event_type.lower()} ke media eksternal {drive_letter} ({path})",
+        {"drive_letter": drive_letter, "event_type": event_type, "path": path},
+    )
+    return alert if created else None

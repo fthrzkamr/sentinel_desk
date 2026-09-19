@@ -1,3 +1,4 @@
+import hashlib
 import secrets
 
 from django.conf import settings
@@ -231,3 +232,48 @@ class EnrollmentToken(models.Model):
         self.used_at = timezone.now()
         self.used_by_device = device
         self.save(update_fields=["used_at", "used_by_device"])
+
+
+class AgentRelease(models.Model):
+    """One uploaded build of the Windows agent .exe. At most one row is
+    `is_active` at a time — that's the version every agent's periodic
+    version check compares itself against and self-updates to. sha256 is
+    computed at save time so the agent can verify the download wasn't
+    corrupted or tampered with in transit before it ever executes it."""
+
+    version = models.CharField(max_length=30, unique=True)
+    exe_file = models.FileField(upload_to="agent_releases/")
+    sha256 = models.CharField(max_length=64, editable=False, blank=True)
+    file_size = models.PositiveBigIntegerField(editable=False, default=0)
+    is_active = models.BooleanField(default=False)
+    notes = models.CharField(max_length=255, blank=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="agent_releases"
+    )
+    released_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-released_at"]
+
+    def __str__(self):
+        return f"AgentRelease({self.version})"
+
+    def save(self, *args, **kwargs):
+        is_new_file = bool(self.exe_file) and not self.sha256
+        if is_new_file:
+            hasher = hashlib.sha256()
+            size = 0
+            for chunk in self.exe_file.chunks():
+                hasher.update(chunk)
+                size += len(chunk)
+            self.sha256 = hasher.hexdigest()
+            self.file_size = size
+
+        super().save(*args, **kwargs)
+
+        if self.is_active:
+            AgentRelease.objects.exclude(pk=self.pk).update(is_active=False)
+
+    @classmethod
+    def get_active(cls) -> "AgentRelease | None":
+        return cls.objects.filter(is_active=True).first()

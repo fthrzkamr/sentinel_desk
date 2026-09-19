@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.http import FileResponse
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, generics, status
@@ -11,8 +12,9 @@ from apps.accounts.permissions import HasPermission
 from apps.audit.services import get_client_ip, log_action
 
 from .authentication import DeviceTokenAuthentication, IsDevice
-from .models import Branch, Company, Department, Device, DeviceCredential, Employee, EnrollmentToken
+from .models import AgentRelease, Branch, Company, Department, Device, DeviceCredential, Employee, EnrollmentToken
 from .serializers import (
+    AgentReleaseSerializer,
     BranchSerializer,
     CompanySerializer,
     DepartmentSerializer,
@@ -303,3 +305,85 @@ class EmployeeDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAuthenticated, HasPermission("device.manage")]
     queryset = Employee.objects.all()
     serializer_class = EmployeeSerializer
+
+
+# --- Agent self-update ---
+# An admin uploads a new .exe build once (AgentReleaseListCreateView) and
+# marks it active; every agent's own periodic check (AgentVersionView) then
+# picks it up and — if newer than its own AGENT_VERSION — downloads it
+# (AgentDownloadView), verifies the sha256 computed at upload time, and
+# swaps its own executable. No manual re-deployment to each laptop needed.
+
+
+class AgentVersionView(APIView):
+    authentication_classes = [DeviceTokenAuthentication]
+    permission_classes = [IsDevice]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "agent"
+
+    def get(self, request):
+        release = AgentRelease.get_active()
+        if not release:
+            return Response({"detail": "No active release configured."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {
+                "version": release.version,
+                "sha256": release.sha256,
+                "file_size": release.file_size,
+                "notes": release.notes,
+            }
+        )
+
+
+class AgentDownloadView(APIView):
+    authentication_classes = [DeviceTokenAuthentication]
+    permission_classes = [IsDevice]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "agent"
+
+    def get(self, request):
+        release = AgentRelease.get_active()
+        if not release or not release.exe_file:
+            return Response({"detail": "No active release configured."}, status=status.HTTP_404_NOT_FOUND)
+
+        device: Device = request.auth
+        log_action(
+            action="agent.update_downloaded",
+            device_id=device.device_id,
+            request=request,
+            metadata={"version": release.version},
+        )
+        response = FileResponse(release.exe_file.open("rb"), content_type="application/octet-stream")
+        response["Content-Disposition"] = f'attachment; filename="SentinelDeskAgent-{release.version}.exe"'
+        response["Content-Length"] = release.file_size
+        return response
+
+
+class AgentReleaseListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated, HasPermission("agent.manage")]
+    serializer_class = AgentReleaseSerializer
+    queryset = AgentRelease.objects.select_related("uploaded_by").all()
+
+    def perform_create(self, serializer):
+        release = serializer.save(uploaded_by=self.request.user)
+        log_action(
+            user=self.request.user,
+            action="agent.release_uploaded",
+            request=self.request,
+            metadata={"version": release.version, "is_active": release.is_active},
+        )
+
+
+class AgentReleaseDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAuthenticated, HasPermission("agent.manage")]
+    queryset = AgentRelease.objects.all()
+    serializer_class = AgentReleaseSerializer
+
+    def perform_update(self, serializer):
+        release = serializer.save()
+        log_action(
+            user=self.request.user,
+            action="agent.release_updated",
+            request=self.request,
+            metadata={"version": release.version, "is_active": release.is_active},
+        )

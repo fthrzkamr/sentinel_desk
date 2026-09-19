@@ -63,10 +63,15 @@ class FileActivityEvent(models.Model):
         DELETED = "DELETED", "Deleted"
         MOVED = "MOVED", "Moved"
 
+    class Source(models.TextChoices):
+        LOCAL = "LOCAL", "Local folder (Desktop/Documents/Downloads)"
+        USB = "USB", "Removable media"
+
     device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="file_activity")
     event_type = models.CharField(max_length=10, choices=EventType.choices)
     path = models.CharField(max_length=1000)
     destination_path = models.CharField(max_length=1000, blank=True)
+    source = models.CharField(max_length=10, choices=Source.choices, default=Source.LOCAL)
     occurred_at = models.DateTimeField()
 
     class Meta:

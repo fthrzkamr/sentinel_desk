@@ -11,6 +11,8 @@ class SystemSettingsSerializer(serializers.ModelSerializer):
     disk_warning_percent = serializers.FloatField(min_value=0, max_value=100)
     disk_critical_percent = serializers.FloatField(min_value=0, max_value=100)
     battery_critical_percent = serializers.FloatField(min_value=0, max_value=100)
+    work_hours_start = serializers.IntegerField(min_value=0, max_value=23)
+    work_hours_end = serializers.IntegerField(min_value=0, max_value=23)
 
     class Meta:
         model = SystemSettings
@@ -25,6 +27,8 @@ class SystemSettingsSerializer(serializers.ModelSerializer):
             "device_offline_threshold_seconds",
             "device_metric_retention_days",
             "activity_retention_days",
+            "work_hours_start",
+            "work_hours_end",
             "updated_at",
         ]
         read_only_fields = ["updated_at"]

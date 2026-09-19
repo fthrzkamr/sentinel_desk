@@ -2,7 +2,15 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
-import { createEnrollmentToken, listEnrollmentTokens, revokeEnrollmentToken } from '@/services/devices'
+import {
+  activateAgentRelease,
+  createEnrollmentToken,
+  deleteAgentRelease,
+  listAgentReleases,
+  listEnrollmentTokens,
+  revokeEnrollmentToken,
+  uploadAgentRelease,
+} from '@/services/devices'
 import {
   createBranch,
   createCompany,
@@ -165,6 +173,88 @@ onMounted(async () => {
   await fetchCompanies()
   await fetchPanelBranches()
   await fetchPanelDepartments()
+})
+
+// --- Agent releases (self-update) ---
+
+const showReleasePanel = ref(false)
+const releases = ref([])
+const isLoadingReleases = ref(false)
+const releaseError = ref('')
+const isUploadingRelease = ref(false)
+const releaseForm = reactive({ version: '', notes: '', isActive: true, file: null })
+const releaseConfirm = reactive({ open: false, release: null })
+
+async function fetchReleases() {
+  isLoadingReleases.value = true
+  try {
+    const { data } = await listAgentReleases()
+    releases.value = data.results ?? data
+  } catch {
+    releaseError.value = 'Gagal memuat daftar release.'
+  } finally {
+    isLoadingReleases.value = false
+  }
+}
+
+function onReleaseFileChange(event) {
+  releaseForm.file = event.target.files[0] || null
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return '-'
+  const mb = bytes / (1024 * 1024)
+  return `${mb.toFixed(1)} MB`
+}
+
+async function handleUploadRelease() {
+  if (!releaseForm.version || !releaseForm.file) {
+    releaseError.value = 'Versi dan file .exe wajib diisi.'
+    return
+  }
+  isUploadingRelease.value = true
+  releaseError.value = ''
+  try {
+    await uploadAgentRelease(releaseForm)
+    releaseForm.version = ''
+    releaseForm.notes = ''
+    releaseForm.isActive = true
+    releaseForm.file = null
+    document.getElementById('release-file-input').value = ''
+    await fetchReleases()
+  } catch (error) {
+    releaseError.value = error.response?.data?.version?.[0] || error.response?.data?.detail || 'Gagal upload release.'
+  } finally {
+    isUploadingRelease.value = false
+  }
+}
+
+async function handleActivateRelease(release) {
+  try {
+    await activateAgentRelease(release.id)
+    await fetchReleases()
+  } catch {
+    releaseError.value = 'Gagal mengaktifkan release.'
+  }
+}
+
+function askDeleteRelease(release) {
+  releaseConfirm.open = true
+  releaseConfirm.release = release
+}
+
+async function confirmDeleteRelease() {
+  releaseConfirm.open = false
+  try {
+    await deleteAgentRelease(releaseConfirm.release.id)
+    await fetchReleases()
+  } catch {
+    releaseError.value = 'Gagal menghapus release.'
+  }
+}
+
+watch(showReleasePanel, (open) => {
+  if (open && releases.value.length === 0) fetchReleases()
 })
 
 // --- Org structure management panel ---
@@ -383,6 +473,13 @@ async function confirmDelete() {
         >
           {{ showOrgPanel ? 'Tutup kelola organisasi' : 'Kelola Company/Branch/Dept/Karyawan' }}
         </button>
+        <button
+          type="button"
+          class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+          @click="showReleasePanel = !showReleasePanel"
+        >
+          {{ showReleasePanel ? 'Tutup Agent Release' : 'Kelola Agent Release' }}
+        </button>
       </form>
 
       <div class="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-4">
@@ -453,6 +550,114 @@ async function confirmDelete() {
       </div>
 
       <p v-if="errorMessage" class="mt-3 text-sm text-red-600">{{ errorMessage }}</p>
+    </div>
+
+    <div v-if="showReleasePanel" class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-900/5">
+      <h2 class="text-sm font-semibold text-slate-700">Kelola Agent Release</h2>
+      <p class="mt-1 text-xs text-slate-400">
+        Upload build .exe baru dan aktifkan — semua laptop yang sudah terpasang agent akan otomatis
+        download &amp; update sendiri di check berikutnya (paling lama 1 jam), tanpa perlu ke laptop
+        satu-satu.
+      </p>
+
+      <form class="mt-3 flex flex-wrap items-end gap-3" @submit.prevent="handleUploadRelease">
+        <div>
+          <label class="mb-1 block text-xs font-medium text-slate-600">Versi</label>
+          <input
+            v-model="releaseForm.version"
+            type="text"
+            placeholder="mis. 0.3.0"
+            class="w-32 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+        </div>
+        <div>
+          <label class="mb-1 block text-xs font-medium text-slate-600">Catatan (opsional)</label>
+          <input
+            v-model="releaseForm.notes"
+            type="text"
+            placeholder="mis. tambah fitur X"
+            class="w-56 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+        </div>
+        <div>
+          <label class="mb-1 block text-xs font-medium text-slate-600">File .exe</label>
+          <input
+            id="release-file-input"
+            type="file"
+            accept=".exe"
+            class="block w-56 text-xs text-slate-600 file:mr-2 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-2 file:py-1 file:text-xs"
+            @change="onReleaseFileChange"
+          />
+        </div>
+        <label class="mb-1.5 flex items-center gap-1.5 text-xs text-slate-600">
+          <input v-model="releaseForm.isActive" type="checkbox" />
+          Aktifkan langsung
+        </label>
+        <button
+          type="submit"
+          :disabled="isUploadingRelease"
+          class="rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+        >
+          {{ isUploadingRelease ? 'Mengupload...' : 'Upload Release' }}
+        </button>
+      </form>
+      <p v-if="releaseError" class="mt-2 text-xs text-red-600">{{ releaseError }}</p>
+
+      <div class="mt-4 overflow-x-auto rounded-lg border border-slate-100">
+        <table class="min-w-full divide-y divide-slate-100 text-sm">
+          <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="px-3 py-2">Versi</th>
+              <th class="px-3 py-2">Ukuran</th>
+              <th class="px-3 py-2">Catatan</th>
+              <th class="px-3 py-2">Diupload oleh</th>
+              <th class="px-3 py-2">Tanggal</th>
+              <th class="px-3 py-2">Status</th>
+              <th class="px-3 py-2 text-right">Aksi</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <tr v-if="isLoadingReleases">
+              <td colspan="7" class="px-3 py-4 text-center text-slate-400">Memuat data...</td>
+            </tr>
+            <tr v-else-if="releases.length === 0">
+              <td colspan="7" class="px-3 py-4 text-center text-slate-400">Belum ada release yang diupload.</td>
+            </tr>
+            <tr v-for="release in releases" v-else :key="release.id" class="hover:bg-slate-50">
+              <td class="px-3 py-2 font-medium text-slate-700">{{ release.version }}</td>
+              <td class="px-3 py-2 text-slate-500">{{ formatBytes(release.file_size) }}</td>
+              <td class="px-3 py-2 text-slate-500">{{ release.notes || '-' }}</td>
+              <td class="px-3 py-2 text-slate-500">{{ release.uploaded_by || '-' }}</td>
+              <td class="px-3 py-2 text-slate-500">{{ new Date(release.released_at).toLocaleString() }}</td>
+              <td class="px-3 py-2">
+                <span
+                  class="rounded-full px-2 py-0.5 text-xs font-semibold"
+                  :class="release.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'"
+                >
+                  {{ release.is_active ? 'Aktif' : 'Tidak aktif' }}
+                </span>
+              </td>
+              <td class="px-3 py-2 text-right">
+                <div class="flex justify-end gap-2">
+                  <button
+                    v-if="!release.is_active"
+                    class="rounded-md border border-emerald-300 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+                    @click="handleActivateRelease(release)"
+                  >
+                    Aktifkan
+                  </button>
+                  <button
+                    class="rounded-md bg-red-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700"
+                    @click="askDeleteRelease(release)"
+                  >
+                    Hapus
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div v-if="showOrgPanel" class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-900/5">
@@ -676,6 +881,16 @@ async function confirmDelete() {
       danger
       @confirm="confirmRevoke"
       @cancel="confirmState.open = false"
+    />
+
+    <ConfirmDialog
+      :open="releaseConfirm.open"
+      title="Hapus agent release?"
+      :message="`Versi ${releaseConfirm.release?.version} akan dihapus permanen.`"
+      confirm-label="Hapus"
+      danger
+      @confirm="confirmDeleteRelease"
+      @cancel="releaseConfirm.open = false"
     />
   </div>
 </template>

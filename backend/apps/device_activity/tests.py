@@ -164,3 +164,78 @@ def test_prune_old_activity_deletes_only_past_retention_window(enrolled_device):
     assert BrowsingHistoryEntry.objects.filter(url="https://recent.example").count() == 1
     assert FileActivityEvent.objects.filter(path="old.txt").count() == 0
     assert FileActivityEvent.objects.filter(path="recent.txt").count() == 1
+
+
+# --- Out-of-hours and data-exfiltration alerts ---
+
+
+def _local(hour):
+    naive = datetime.datetime(2026, 1, 15, hour, 0)
+    return timezone.make_aware(naive, timezone.get_current_timezone())
+
+
+@pytest.mark.django_db
+def test_browsing_outside_work_hours_triggers_alert(enrolled_device):
+    device_id, device_token = enrolled_device
+    SystemSettings.objects.update_or_create(pk=1, defaults={"work_hours_start": 8, "work_hours_end": 18})
+
+    payload = {
+        "items": [{"browser": "Chrome", "url": "https://example.com", "title": "x", "visited_at": _local(2).isoformat()}]
+    }
+    resp = _agent_post(device_id, device_token, "/api/agent/browsing-history/", payload)
+    assert resp.status_code == 201
+
+    assert Alert.objects.filter(device__device_id=device_id, category=Alert.Category.OUT_OF_HOURS).exists()
+
+
+@pytest.mark.django_db
+def test_browsing_within_work_hours_does_not_trigger_alert(enrolled_device):
+    device_id, device_token = enrolled_device
+    SystemSettings.objects.update_or_create(pk=1, defaults={"work_hours_start": 8, "work_hours_end": 18})
+
+    payload = {
+        "items": [{"browser": "Chrome", "url": "https://example.com", "title": "x", "visited_at": _local(10).isoformat()}]
+    }
+    resp = _agent_post(device_id, device_token, "/api/agent/browsing-history/", payload)
+    assert resp.status_code == 201
+
+    assert not Alert.objects.filter(device__device_id=device_id, category=Alert.Category.OUT_OF_HOURS).exists()
+
+
+@pytest.mark.django_db
+def test_usb_sourced_file_creation_triggers_data_exfil_alert(enrolled_device):
+    device_id, device_token = enrolled_device
+    payload = {
+        "items": [
+            {
+                "event_type": "CREATED",
+                "path": r"E:\confidential_report.xlsx",
+                "source": "USB",
+                "occurred_at": _local(10).isoformat(),
+            }
+        ]
+    }
+    resp = _agent_post(device_id, device_token, "/api/agent/file-activity/", payload)
+    assert resp.status_code == 201
+
+    alert = Alert.objects.get(device__device_id=device_id, category=Alert.Category.DATA_EXFIL)
+    assert alert.severity == Alert.Severity.CRITICAL
+    assert alert.metadata["drive_letter"] == "E:"
+
+
+@pytest.mark.django_db
+def test_local_sourced_file_creation_does_not_trigger_data_exfil_alert(enrolled_device):
+    device_id, device_token = enrolled_device
+    payload = {
+        "items": [
+            {
+                "event_type": "CREATED",
+                "path": r"C:\Users\budi\Desktop\report.xlsx",
+                "occurred_at": _local(10).isoformat(),
+            }
+        ]
+    }
+    resp = _agent_post(device_id, device_token, "/api/agent/file-activity/", payload)
+    assert resp.status_code == 201
+
+    assert not Alert.objects.filter(device__device_id=device_id, category=Alert.Category.DATA_EXFIL).exists()
