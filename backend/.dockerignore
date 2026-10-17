@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+staticfiles/
+media/
+*.sqlite3
+.env
+tmp_*.json
+tmp_*.sh

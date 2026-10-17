@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SentinelDesk Agent MSI installer (WiX Toolset v5).
+
+  Reuses everything already built for the manual admin CLI flow - this
+  installer does not reimplement scheduled-task/service setup, it just
+  calls the agent's own install hardening / uninstall hardening CLI flags
+  (see ../src/services/hardening.py) as custom actions, the same commands
+  an admin would otherwise type by hand.
+
+  Build (from this `installer/` directory, after running build.ps1 to
+  stage payload/):
+    wix build Product.wxs -out SentinelDeskAgent.msi
+
+  Silent install for GPO/RMM push:
+    msiexec /i SentinelDeskAgent.msi SERVERURL="http://your-server:8000" ENROLLMENTTOKEN="<token>" /qn
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package
+    Name="SentinelDesk Agent"
+    Manufacturer="SentinelDesk"
+    Version="0.8.15.0"
+    UpgradeCode="8f2b6b6e-6f2a-4a3e-9c3a-2f6a1b6c9d10"
+    Compressed="yes"
+    Scope="perMachine">
+
+    <!-- Automatically uninstalls the previous version before installing a
+         newer one, as long as UpgradeCode above stays the same across
+         every future version bump.
+
+         Schedule="afterInstallInitialize" (not the default, afterInstallExecute)
+         is required here specifically because the agent is a long-running
+         process that Watchdog keeps relaunching. The default schedule writes
+         the NEW files first and only removes the OLD product afterward -
+         meaning the OLD exe (and its Watchdog-kept-alive process) is still
+         running, actively locking the file, at the exact moment the new one
+         tries to land in the same spot. Confirmed live: a plain
+         double-click install over a running agent hit Windows Installer's
+         "unable to automatically close all requested applications" dialog
+         for exactly this reason. afterInstallInitialize fully removes the
+         old product - including UninstallHardening below, which stops the
+         Watchdog service and kills the agent process - before any new file
+         is written, so there's nothing left to contend over. -->
+    <MajorUpgrade
+      Schedule="afterInstallInitialize"
+      DowngradeErrorMessage="A newer version of SentinelDesk Agent is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Without this, a double-clicked install shows a bare progress bar
+         and closes with no Finish/error dialog - confusing when trying to
+         tell whether it actually worked. WixUI_Minimal is just
+         Welcome -> Progress -> Finish, no options to click through. -->
+    <ui:WixUI Id="WixUI_Minimal" />
+
+    <!-- ServerUrl/EnrollmentToken preprocessor variables let build.ps1
+         bake a real, already-created reusable enrollment key straight into
+         the compiled .msi (via `wix build -d EnrollmentToken=...`) for a
+         true zero-parameter, double-click mass-deployment install — without
+         ever putting that secret in this checked-into-git source file.
+         Not passed, ServerUrl falls back to localhost and EnrollmentToken
+         stays undefined, exactly like a plain `wix build` did before this
+         existed; msiexec /i ... SERVERURL=... ENROLLMENTTOKEN=... on the
+         command line still overrides either at install time either way. -->
+    <?ifndef ServerUrl?>
+      <?define ServerUrl = "http://localhost:8000"?>
+    <?endif?>
+
+    <Property Id="SERVERURL" Value="$(var.ServerUrl)" Secure="yes" />
+
+    <!-- WiX rejects an explicit empty string Value, so the property only
+         gets one at all when build.ps1 actually passed -d EnrollmentToken
+         (see ifdef below) - otherwise it's left unset, same as before,
+         which already resolves to "" when referenced in ExeCommand. -->
+    <?ifdef EnrollmentToken?>
+      <Property Id="ENROLLMENTTOKEN" Value="$(var.EnrollmentToken)" Secure="yes" />
+    <?else?>
+      <Property Id="ENROLLMENTTOKEN" Secure="yes" />
+    <?endif?>
+
+    <!-- ProgramData, not Program Files: the running agent (launched as a
+         standard, non-elevated user via the Scheduled Task - see
+         hardening.py) writes to this folder constantly - logs/agent.log
+         every run, credentials.dat at enrollment, and the self-update
+         mechanism replaces SentinelDeskAgent.exe itself in place. Program
+         Files is locked read-only for standard users by design (that's
+         the whole point of it), which is exactly what caused the
+         "Permission denied: ...\logs\agent.log" crash on first run when
+         this was ProgramFiles64Folder - ProgramData is Windows' actual
+         standard location for exactly this kind of writable, per-machine
+         application data. -->
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="SentinelDesk">
+        <Directory Id="WATCHDOGFOLDER" Name="SentinelDeskWatchdog" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppProgramMenuFolder" Name="SentinelDesk" />
+    </StandardDirectory>
+
+    <!-- Main agent exe -->
+    <Component Id="AgentExeComponent" Directory="INSTALLFOLDER" Guid="c1a2b3c4-1111-4a2b-8c3d-4e5f6a7b8c9d">
+      <File Id="AgentExeFile" Source="payload\SentinelDeskAgent.exe" KeyPath="yes" />
+    </Component>
+
+    <!-- .env, generated from the two properties above plus the same
+         opt-in-by-default monitor flags every device is configured with
+         today (see ../.env.example) — nothing is enabled that wasn't
+         already opt-in before this installer existed. -->
+    <Component Id="EnvFileComponent" Directory="INSTALLFOLDER" Guid="c1a2b3c4-2222-4a2b-8c3d-4e5f6a7b8c9d">
+      <File Id="EnvFile" Source="payload\.env" KeyPath="yes" />
+    </Component>
+
+    <!-- The watchdog is built onedir (a whole folder of DLLs alongside its
+         exe — see ../SentinelDeskWatchdog.spec for why), so its files are
+         wildcard-harvested here instead of hand-listed: the exact DLL set
+         PyInstaller bundles isn't something to hardcode and keep in sync
+         by hand every rebuild. -->
+    <ComponentGroup Id="WatchdogFiles" Directory="WATCHDOGFOLDER">
+      <Files Include="payload\SentinelDeskWatchdog\**" />
+    </ComponentGroup>
+
+    <Component Id="ShortcutComponent" Directory="AppProgramMenuFolder" Guid="c1a2b3c4-3333-4a2b-8c3d-4e5f6a7b8c9d">
+      <Shortcut
+        Id="UninstallShortcut"
+        Name="Uninstall SentinelDesk Agent"
+        Target="[System64Folder]msiexec.exe"
+        Arguments="/x [ProductCode]" />
+      <RemoveFolder Id="RemoveAppProgramMenuFolder" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\SentinelDesk\Agent" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!-- RemoveFiles (the standard action) only deletes files this MSI
+         itself installed as Components above - it has no idea about
+         anything the running agent created on its own afterward
+         (logs\agent.log, the onefile bootloader's _runtime\ extraction
+         folder, SentinelDeskWatchdog\logs\*.log). Left behind, those are
+         exactly what previously forced a manual "delete the folder by
+         hand before reinstalling" step. RemoveFolderEx (from the util
+         extension - see build.ps1's `-ext WixToolset.Util.wixext`) wipes
+         INSTALLFOLDER's entire remaining tree, tracked or not, as part of
+         the same uninstall sequence - timed safely after KillAgentProcess
+         below has already ended the one process that could still be
+         holding any of those files open. -->
+    <Component Id="CleanupComponent" Directory="INSTALLFOLDER" Guid="c1a2b3c4-5555-4a2b-8c3d-4e5f6a7b8c9d">
+      <util:RemoveFolderEx On="uninstall" Property="INSTALLFOLDER" />
+      <RegistryValue Root="HKLM" Key="Software\SentinelDesk\Agent" Name="cleanup" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Feature Id="MainFeature" Title="SentinelDesk Agent" Level="1">
+      <ComponentRef Id="AgentExeComponent" />
+      <ComponentRef Id="EnvFileComponent" />
+      <ComponentGroupRef Id="WatchdogFiles" />
+      <ComponentRef Id="ShortcutComponent" />
+      <ComponentRef Id="CleanupComponent" />
+    </Feature>
+
+    <!-- === Custom actions ===
+         Deferred + Impersonate="no" runs these as SYSTEM after files are
+         in place, matching how an admin would run them by hand from an
+         elevated prompt — hardening.py's is_admin() check needs exactly
+         that. Return="ignore" on every one below: a hiccup here (e.g. a
+         Scheduled-Task API glitch) shouldn't roll back the whole install/
+         uninstall, since the plain agent still works without hardening
+         (see hardening.py's own module docstring on this being optional,
+         reversible tamper-resistance, not a hard requirement). -->
+
+    <!-- An earlier version of this had a GrantUserWriteAccess custom action
+         here running `icacls` to grant BUILTIN\Users write access on
+         INSTALLFOLDER, meant to fix a "Permission denied: ...\logs\
+         agent.log" crash. It was removed: after extensive debugging, that
+         crash's real cause turned out to be unrelated to folder ACLs -
+         InstallHardening below runs this agent's own exe as SYSTEM, and
+         the agent's top-level logging setup used to run unconditionally at
+         import time, so SYSTEM ended up being the one who first created
+         logs\agent.log. A file's creator gets an automatic CREATOR OWNER
+         grant on it; the standard user this agent actually runs as
+         afterward (via the Scheduled Task) only inherited the folder's
+         generic Read+Execute - not enough to append to a file SYSTEM
+         already owned, no matter what additional ACL was granted on the
+         *folder* (confirmed via `icacls` across several attempts: an
+         inherited grant on the folder does not retroactively change an
+         already-created file's own ACL). The actual fix lives in
+         ../src/main.py now: its file-logging setup is deferred into run()
+         specifically so the standard-user-launched process is always the
+         one that creates this file first, which is sufficient on its own -
+         no folder-level icacls grant needed. -->
+    <!-- The staged .env (copied from .env.example, see build.ps1) ships
+         with blank/placeholder SERVER_URL and ENROLLMENT_TOKEN lines.
+         These two appends add the real values from the MSI properties as
+         later lines in the same file — python-dotenv resolves a repeated
+         key to whichever occurrence comes last while parsing the file top
+         to bottom, so the appended lines correctly win over the
+         placeholders already in the template. -->
+    <CustomAction Id="SetServerUrl"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="cmd.exe /c echo SERVER_URL=[SERVERURL]>>&quot;[INSTALLFOLDER].env&quot;"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <CustomAction Id="SetEnrollmentToken"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="cmd.exe /c echo ENROLLMENT_TOKEN=[ENROLLMENTTOKEN]>>&quot;[INSTALLFOLDER].env&quot;"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <CustomAction Id="InstallHardening"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]SentinelDeskAgent.exe&quot; --install-hardening"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <CustomAction Id="UninstallHardening"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]SentinelDeskAgent.exe&quot; --uninstall-hardening"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <CustomAction Id="KillAgentProcess"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="taskkill /F /IM SentinelDeskAgent.exe"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <!-- Install path: only once files actually exist and only on a real
+           (non-uninstall-driven) install. No separate "trigger first run"
+           step here on purpose - InstallHardening's own install-hardening
+           flag call starts the Watchdog Service, and the watchdog's main
+           loop checks-and-relaunches the agent immediately on its own
+           first iteration (see watchdog_service.py), no delay. -->
+      <Custom Action="SetServerUrl" After="InstallFiles" Condition="NOT Installed AND NOT REMOVE" />
+      <Custom Action="SetEnrollmentToken" After="SetServerUrl" Condition="NOT Installed AND NOT REMOVE" />
+      <Custom Action="InstallHardening" After="SetEnrollmentToken" Condition="NOT Installed AND NOT REMOVE" />
+
+      <!-- Uninstall path: tear down hardening and kill any running
+           process BEFORE RemoveFiles deletes the exe out from under
+           them. REMOVE="ALL" also covers the "remove old version during
+           a major upgrade" case, which is intentional — the incoming
+           new version's own InstallHardening call re-establishes it. -->
+      <Custom Action="UninstallHardening" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot;" />
+      <Custom Action="KillAgentProcess" After="UninstallHardening" Condition="REMOVE=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+
+  </Package>
+</Wix>

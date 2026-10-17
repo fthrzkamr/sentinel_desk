@@ -1,0 +1,248 @@
+from datetime import timedelta
+from pathlib import Path
+
+import environ
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = BASE_DIR.parent
+
+env = environ.Env(
+    DJANGO_DEBUG=(bool, False),
+)
+environ.Env.read_env(PROJECT_ROOT / ".env")
+
+SECRET_KEY = env("DJANGO_SECRET_KEY")
+DEBUG = env("DJANGO_DEBUG")
+ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
+
+DJANGO_APPS = [
+    "daphne",  # must stay first: makes `runserver` ASGI/WebSocket-aware
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+]
+
+THIRD_PARTY_APPS = [
+    "rest_framework",
+    "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
+    "corsheaders",
+    "django_filters",
+    "channels",
+    "django_celery_beat",
+]
+
+LOCAL_APPS = [
+    "apps.accounts",
+    "apps.devices",
+    "apps.monitoring",
+    "apps.locations",
+    "apps.software",
+    "apps.alerts",
+    "apps.audit",
+    "apps.system_settings",
+    "apps.livescreen",
+    "apps.device_activity",
+]
+
+INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
+
+MIDDLEWARE = [
+    "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+]
+
+ROOT_URLCONF = "config.urls"
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.debug",
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
+
+DATABASES = {
+    "default": env.db("DATABASE_URL")
+}
+
+AUTH_USER_MODEL = "accounts.User"
+
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 10}},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+LANGUAGE_CODE = "en-us"
+TIME_ZONE = env("DJANGO_TIME_ZONE", default="Asia/Jakarta")
+USE_I18N = True
+USE_TZ = True
+
+STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Only used to store uploaded agent .exe releases — served through an
+# authenticated view (AgentDownloadView), never directly via MEDIA_URL.
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# --- Redis / Channels ---
+REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [REDIS_URL],
+        },
+    },
+}
+
+# Without this, Django silently falls back to LocMemCache (per-process, not
+# shared) — several things already assume a real shared cache: livescreen's
+# presence tracking (apps/livescreen/presence.py, needs every Daphne worker
+# to see the same agent/admin pairing), DRF's rate-limit throttle counters,
+# and SystemSettings' cache (apps/settings). All three only happened to work
+# in dev because Daphne runs as a single process there — this breaks the
+# moment there's more than one worker/replica. Django's built-in Redis
+# backend needs no extra package beyond `redis` (already a dependency).
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+        "KEY_PREFIX": "sentineldesk",
+    },
+}
+
+# --- Celery ---
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_URL
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+
+CELERY_BEAT_SCHEDULE = {
+    "mark-stale-devices-offline": {
+        "task": "apps.monitoring.tasks.mark_stale_devices_offline",
+        "schedule": 20.0,
+    },
+    "prune-old-metrics": {
+        "task": "apps.monitoring.tasks.prune_old_metrics",
+        "schedule": 3600.0,
+    },
+    "prune-old-activity": {
+        "task": "apps.device_activity.tasks.prune_old_activity",
+        "schedule": 3600.0,
+    },
+}
+
+# --- Django REST Framework ---
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.IsAuthenticated",
+    ),
+    "DEFAULT_FILTER_BACKENDS": (
+        "django_filters.rest_framework.DjangoFilterBackend",
+    ),
+    "DEFAULT_PAGINATION_CLASS": "config.pagination.DefaultPagination",
+    "PAGE_SIZE": 25,
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.ScopedRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "auth": "10/min",
+        "agent": "120/min",
+        # Separate from "agent" above on purpose: that scope is tuned for
+        # one device's own occasional per-minute activity, not a bulk
+        # backfill pushing every existing asset_dfm row in one tight loop
+        # (see sync_all_to_sentineldesk.php on the asset_dfm side) - at
+        # 120/min that bulk sync starts getting 429'd partway through a
+        # fleet-sized batch. Already gated by its own API key (see
+        # AssetSyncView), so a higher ceiling here is reasonable.
+        "asset_sync": "1000/min",
+        # Baseline ceiling for every authenticated endpoint that doesn't
+        # declare its own throttle_scope (Alerts, Users, Audit Logs, etc.) —
+        # ScopedRateThrottle silently skips any view without a scope, so
+        # without this those endpoints had no rate limit at all.
+        "user": "300/min",
+    },
+    "DATETIME_FORMAT": "iso-8601",
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    "UPDATE_LAST_LOGIN": True,
+}
+
+# --- CORS ---
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=["http://localhost:5173"])
+CORS_ALLOW_CREDENTIALS = True
+
+# --- Security headers (safe defaults, tightened further in production.py) ---
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
+
+# --- SentinelDesk domain settings ---
+DEVICE_OFFLINE_THRESHOLD_SECONDS = env.int("DEVICE_OFFLINE_THRESHOLD_SECONDS", default=60)
+DEFAULT_MONITOR_INTERVAL_SECONDS = env.int("DEFAULT_MONITOR_INTERVAL_SECONDS", default=15)
+ENROLLMENT_TOKEN_TTL_MINUTES = env.int("ENROLLMENT_TOKEN_TTL_MINUTES", default=60)
+DEVICE_METRIC_RETENTION_DAYS = env.int("DEVICE_METRIC_RETENTION_DAYS", default=7)
+ACTIVITY_RETENTION_DAYS = env.int("ACTIVITY_RETENTION_DAYS", default=180)
+WORK_HOURS_START = env.int("WORK_HOURS_START", default=8)
+WORK_HOURS_END = env.int("WORK_HOURS_END", default=18)
+
+# Device status thresholds — CRITICAL takes priority over WARNING when both match.
+CPU_WARNING_PERCENT = env.float("CPU_WARNING_PERCENT", default=80)
+CPU_CRITICAL_PERCENT = env.float("CPU_CRITICAL_PERCENT", default=95)
+RAM_WARNING_PERCENT = env.float("RAM_WARNING_PERCENT", default=80)
+RAM_CRITICAL_PERCENT = env.float("RAM_CRITICAL_PERCENT", default=95)
+DISK_WARNING_PERCENT = env.float("DISK_WARNING_PERCENT", default=85)
+DISK_CRITICAL_PERCENT = env.float("DISK_CRITICAL_PERCENT", default=95)
+BATTERY_CRITICAL_PERCENT = env.float("BATTERY_CRITICAL_PERCENT", default=10)
+
+# --- Location (Phase 5) ---
+# Free-tier lookup, city-level accuracy only — see apps/locations/services.py.
+IP_GEOLOCATION_API_URL = env("IP_GEOLOCATION_API_URL", default="http://ip-api.com/json/")
+IP_GEOLOCATION_TIMEOUT_SECONDS = env.float("IP_GEOLOCATION_TIMEOUT_SECONDS", default=5)
+
+# --- Asset sync (asset_dfm integration) ---
+# Shared secret the separate asset_dfm system sends as X-Api-Key when
+# pushing an asset record to AssetSyncView — machine-to-machine, so this
+# isn't a user login/JWT the way the dashboard's own auth is. No default:
+# an empty/unset key would make the sync endpoint accept any request with
+# no key at all (see AssetSyncView), which must never happen by accident.
+ASSET_SYNC_API_KEY = env("ASSET_SYNC_API_KEY", default="")
