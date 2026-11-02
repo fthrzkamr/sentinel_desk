@@ -86,7 +86,7 @@ class AgentConfig:
 
     @classmethod
     def load(cls) -> "AgentConfig":
-        server_url = os.environ.get("SERVER_URL") or os.environ.get("API_BASE_URL") or "http://localhost:8000"
+        server_url = os.environ.get("SERVER_URL") or os.environ.get("API_BASE_URL") or "http://DESKTOP-U4KO690:8000"
 
         def _flag(name: str) -> bool:
             return os.environ.get(name, "false").lower() == "true"
