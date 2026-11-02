@@ -176,6 +176,26 @@ class Device(models.Model):
 
     def save(self, *args, **kwargs):
         is_new = self._state.adding
+        # If assigned_employee is set, cascade department/branch/company if missing
+        if self.assigned_employee_id and self.assigned_employee:
+            emp = self.assigned_employee
+            dept = emp.department
+            if dept:
+                fields_to_add = []
+                if not self.department_id:
+                    self.department = dept
+                    fields_to_add.append("department")
+                if not self.branch_id and dept.branch:
+                    self.branch = dept.branch
+                    fields_to_add.append("branch")
+                if not self.company_id and dept.branch and dept.branch.company:
+                    self.company = dept.branch.company
+                    fields_to_add.append("company")
+
+                update_fields = kwargs.get("update_fields")
+                if update_fields is not None and fields_to_add:
+                    kwargs["update_fields"] = list(set(update_fields) | set(fields_to_add))
+
         super().save(*args, **kwargs)
         if is_new and not self.device_id:
             self.device_id = f"SD-LPT-{self.pk:06d}"

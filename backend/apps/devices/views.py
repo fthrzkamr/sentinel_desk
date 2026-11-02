@@ -709,14 +709,40 @@ class AssetLinkView(APIView):
         # by definition, so without this, linking the right asset still
         # leaves the device looking blank. Never overwrites an employee
         # that's already set - this only fires the first time.
-        if device and not device.assigned_employee_id:
-            employee = find_employee_by_name(asset.raw_penanggung_jawab)
-            if employee:
-                device.assigned_employee = employee
-                device.save(update_fields=["assigned_employee"])
-                asset.current_employee = employee
-                asset.user_status = Asset.UserStatus.IDENTIFIED
-                asset.save(update_fields=["current_employee", "user_status"])
+        if device:
+            if not device.assigned_employee_id:
+                employee = asset.current_employee or find_employee_by_name(asset.raw_penanggung_jawab)
+                if employee:
+                    device.assigned_employee = employee
+                    update_fields = ["assigned_employee"]
+                    if employee.department:
+                        device.department = employee.department
+                        update_fields.append("department")
+                        if employee.department.branch:
+                            device.branch = employee.department.branch
+                            update_fields.append("branch")
+                            if employee.department.branch.company:
+                                device.company = employee.department.branch.company
+                                update_fields.append("company")
+                    device.save(update_fields=update_fields)
+                    if not asset.current_employee:
+                        asset.current_employee = employee
+                        asset.user_status = Asset.UserStatus.IDENTIFIED
+                        asset.save(update_fields=["current_employee", "user_status"])
+            elif device.assigned_employee and (not device.department_id or not device.branch_id or not device.company_id):
+                emp = device.assigned_employee
+                update_fields = []
+                if not device.department_id and emp.department:
+                    device.department = emp.department
+                    update_fields.append("department")
+                if not device.branch_id and emp.department and emp.department.branch:
+                    device.branch = emp.department.branch
+                    update_fields.append("branch")
+                if not device.company_id and emp.department and emp.department.branch and emp.department.branch.company:
+                    device.company = emp.department.branch.company
+                    update_fields.append("company")
+                if update_fields:
+                    device.save(update_fields=update_fields)
 
         log_action(
             user=request.user,
@@ -774,11 +800,15 @@ class AssetSetUserView(APIView):
             device = asset.device
             device.assigned_employee = employee
             update_fields = ["assigned_employee"]
-            if employee.department_id:
+            if employee.department_id and employee.department:
                 device.department = employee.department
-                device.branch = employee.department.branch
-                device.company = employee.department.branch.company
-                update_fields += ["department", "branch", "company"]
+                update_fields.append("department")
+                if employee.department.branch:
+                    device.branch = employee.department.branch
+                    update_fields.append("branch")
+                    if employee.department.branch.company:
+                        device.company = employee.department.branch.company
+                        update_fields.append("company")
             device.save(update_fields=update_fields)
         elif asset.device_id and not employee:
             # Clearing the asset's user doesn't erase the device's own org

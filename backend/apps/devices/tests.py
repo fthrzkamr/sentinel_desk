@@ -7,6 +7,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import Permission, Role, User
 from apps.audit.models import AuditLog
 from apps.devices.models import (
+    Asset,
     Branch,
     Company,
     Department,
@@ -750,6 +751,27 @@ def test_device_token_rotation_by_admin_and_agent(admin_client, enrollment_token
         HTTP_AUTHORIZATION=f"DeviceToken {new_token_2}",
     )
     assert hb_ok2.status_code == 200
+
+
+@pytest.mark.django_db
+def test_asset_link_auto_cascades_employee_org(org_manager_user, org_tree):
+    company, branch, department, employee = org_tree
+    client = _client_for("orgmanager")
+    device = Device.objects.create(hostname="LAPTOP-UNASSIGNED")
+    asset = Asset.objects.create(
+        asset_code="TEST-ASSET-001",
+        raw_penanggung_jawab=employee.full_name,
+        current_employee=employee,
+    )
+
+    resp = client.post(f"/api/assets/{asset.id}/link/", {"device_id": device.device_id}, format="json")
+    assert resp.status_code == 200
+
+    device.refresh_from_db()
+    assert device.assigned_employee == employee
+    assert device.department == department
+    assert device.branch == branch
+    assert device.company == company
 
 
 

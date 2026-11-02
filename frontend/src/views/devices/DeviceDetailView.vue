@@ -238,6 +238,18 @@ async function startEditOrg() {
   const { data } = await listCompanies({ page_size: 200 })
   orgCompanies.value = data.results || []
 
+  // If employee is assigned but company/branch/dept were not filled, cascade from employee
+  if (orgForm.assigned_employee && (!orgForm.company || !orgForm.branch || !orgForm.department)) {
+    const matched = allOrgEmployees.value.find(
+      (e) => e.id === Number(orgForm.assigned_employee) || e.id === orgForm.assigned_employee
+    )
+    if (matched) {
+      if (!orgForm.company && matched.company_id) orgForm.company = matched.company_id
+      if (!orgForm.branch && matched.branch_id) orgForm.branch = matched.branch_id
+      if (!orgForm.department && matched.department) orgForm.department = matched.department
+    }
+  }
+
   if (orgForm.company) {
     const branchRes = await listBranches({ company: orgForm.company, page_size: 200 })
     orgBranches.value = branchRes.data.results || []
