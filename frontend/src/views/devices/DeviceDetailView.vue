@@ -729,7 +729,7 @@ async function handleRotateToken() {
             <span
               v-if="!device.is_approved"
               class="inline-block rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700"
-              title="Device ini enroll lewat reusable deployment key — belum bisa mengirim data sampai di-approve"
+              title="Device ini terdaftar otomatis — menunggu persetujuan (approval) admin"
             >
               Pending Approval
             </span>

@@ -291,7 +291,7 @@ async function confirmReassign() {
           </tr>
           <tr v-else-if="devices.length === 0">
             <td colspan="11" class="px-4 py-8 text-center text-slate-400">
-              Belum ada device terdaftar. Buat enrollment token di menu Agents lalu jalankan agent.
+              Belum ada device terdaftar. Cukup jalankan <span class="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-600">SentinelDeskAgent.exe</span> pada laptop karyawan, perangkat akan otomatis terdaftar dan muncul di sini untuk disetujui.
             </td>
           </tr>
           <tr v-for="(device, index) in devices" v-else :key="device.id" class="hover:bg-slate-50">
@@ -324,7 +324,7 @@ async function confirmReassign() {
                 <span
                   v-if="!device.is_approved"
                   class="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
-                  title="Device ini enroll lewat reusable deployment key — belum bisa mengirim data sampai di-approve"
+                  title="Device ini terdaftar otomatis — menunggu persetujuan (approval) admin"
                 >
                   Pending
                 </span>

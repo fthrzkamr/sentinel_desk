@@ -217,9 +217,12 @@ const greeting = computed(() => {
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="h-10 w-10 text-slate-300">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m-9 0h9m-9 0H4.5A2.25 2.25 0 012.25 15V5.25A2.25 2.25 0 014.5 3h15a2.25 2.25 0 012.25 2.25V15a2.25 2.25 0 01-2.25 2.25H15" />
                   </svg>
-                  <span>Belum ada device yang aktif.</span>
-                  <RouterLink to="/agents" class="text-xs font-medium text-brand-600 hover:underline">
-                    Buat enrollment token →
+                  <span class="font-medium text-slate-600">Belum ada device yang aktif.</span>
+                  <p class="text-xs text-slate-400 max-w-sm text-center">
+                    Cukup jalankan <span class="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-600">SentinelDeskAgent.exe</span> pada laptop karyawan untuk mendaftar otomatis tanpa token.
+                  </p>
+                  <RouterLink to="/devices" class="mt-1 text-xs font-semibold text-brand-600 hover:underline">
+                    Buka halaman Devices →
                   </RouterLink>
                 </div>
               </td>
