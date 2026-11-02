@@ -31,12 +31,6 @@ const routes = [
         meta: { permission: 'device.view' },
       },
       {
-        path: 'agents',
-        name: 'agents',
-        component: () => import('@/views/agents/AgentTokensView.vue'),
-        meta: { permission: 'agent.manage' },
-      },
-      {
         path: 'map',
         name: 'map',
         component: () => import('@/views/locations/MapView.vue'),

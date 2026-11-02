@@ -36,18 +36,6 @@ export function getDeviceAssetSuggestions(deviceId) {
   return api.get(`/devices/${deviceId}/asset-suggestions/`)
 }
 
-export function listEnrollmentTokens() {
-  return api.get('/agent/enrollment-tokens/')
-}
-
-export function createEnrollmentToken(payload) {
-  return api.post('/agent/enrollment-tokens/', payload)
-}
-
-export function revokeEnrollmentToken(id) {
-  return api.post(`/agent/enrollment-tokens/${id}/revoke/`)
-}
-
 export function listAssets(params = {}) {
   return api.get('/assets/', { params })
 }
