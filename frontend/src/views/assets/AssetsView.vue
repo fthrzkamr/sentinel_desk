@@ -485,7 +485,8 @@ async function unlinkAsset(asset) {
               :class="{ 'bg-brand-50 font-medium text-brand-700': e.id === userState.employeeId }"
               @mousedown.prevent="selectEmployee(e)"
             >
-              {{ e.full_name }}
+              <div class="font-medium text-slate-800">{{ e.full_name }}</div>
+              <div class="text-xs text-slate-500">{{ e.branch_name || 'Kantor' }} &middot; {{ e.department_name || e.position || 'Staff' }}</div>
             </button>
             <p v-if="filteredEmployees.length === 0" class="px-3 py-1.5 text-sm text-slate-400">Tidak ditemukan</p>
           </div>

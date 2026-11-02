@@ -419,6 +419,29 @@ def test_device_org_assignment_can_be_cleared(org_manager_user, enrollment_token
 
 
 @pytest.mark.django_db
+def test_device_org_assignment_auto_cascades_from_employee(org_manager_user, enrollment_token, org_tree):
+    company, branch, department, employee = org_tree
+    _, raw_token = enrollment_token
+    enroll_resp = APIClient().post("/api/agent/enroll/", {"token": raw_token, "hostname": "LAPTOP-CASCADE"}, format="json")
+    device_id = enroll_resp.data["device_id"]
+
+    client = _client_for("orgmanager")
+    # Patch ONLY assigned_employee — branch, department, and company must automatically follow!
+    response = client.patch(
+        f"/api/devices/{device_id}/",
+        {"assigned_employee": employee.id},
+        format="json",
+    )
+    assert response.status_code == 200
+
+    device = Device.objects.get(device_id=device_id)
+    assert device.assigned_employee_id == employee.id
+    assert device.department_id == department.id
+    assert device.branch_id == branch.id
+    assert device.company_id == company.id
+
+
+@pytest.mark.django_db
 def test_agent_endpoints_reject_missing_device_auth():
     assert APIClient().post("/api/agent/heartbeat/", {}, format="json").status_code == 401
 

@@ -386,6 +386,26 @@ class DeviceDetailView(generics.RetrieveUpdateAPIView):
         serializer = DeviceOrgAssignmentSerializer(device, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+
+        # If employee was assigned, automatically cascade company, branch, and department
+        # so they follow the employee data as expected by the admin
+        if device.assigned_employee and device.assigned_employee.department:
+            emp_dept = device.assigned_employee.department
+            need_save = False
+            if not request.data.get("department"):
+                device.department = emp_dept
+                need_save = True
+            if emp_dept.branch:
+                if not request.data.get("branch"):
+                    device.branch = emp_dept.branch
+                    need_save = True
+                if emp_dept.branch.company:
+                    if not request.data.get("company"):
+                        device.company = emp_dept.branch.company
+                        need_save = True
+            if need_save:
+                device.save(update_fields=["department", "branch", "company"])
+
         rematch_unlinked_assets(device)
         # Mirror of AssetSetUserView's own cascade (see its comment) - an
         # admin reassigning this device straight from Device Detail should

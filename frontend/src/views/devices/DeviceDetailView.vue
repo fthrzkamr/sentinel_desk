@@ -173,73 +173,78 @@ const orgCompanies = ref([])
 const orgBranches = ref([])
 const orgDepartments = ref([])
 const orgEmployees = ref([])
+const allOrgEmployees = ref([])
 
-// Deliberately @change-driven rather than watch()-driven: this form needs
-// to pre-fill from the device's existing assignment (see startEditOrg），
-// and a plain watch() on orgForm.company would also fire — and reset the
-// branch/department it's in the middle of pre-filling — the moment that
-// pre-fill itself assigns a company id. @change only fires on genuine user
-// interaction with the <select>, never on a programmatic value assignment,
-// which is exactly the distinction needed here.
+async function onOrgEmployeeChange() {
+  if (!orgForm.assigned_employee) return
+  const selectedEmp = allOrgEmployees.value.find(
+    (e) => e.id === Number(orgForm.assigned_employee) || e.id === orgForm.assigned_employee
+  )
+  if (selectedEmp) {
+    if (selectedEmp.company_id) {
+      orgForm.company = selectedEmp.company_id
+      const branchRes = await listBranches({ company: orgForm.company, page_size: 200 })
+      orgBranches.value = branchRes.data.results || []
+    }
+    if (selectedEmp.branch_id) {
+      orgForm.branch = selectedEmp.branch_id
+      const deptRes = await listDepartments({ branch: orgForm.branch, page_size: 200 })
+      orgDepartments.value = deptRes.data.results || []
+    }
+    if (selectedEmp.department) {
+      orgForm.department = selectedEmp.department
+    }
+  }
+}
 
 async function onOrgCompanyChange() {
   orgForm.branch = ''
   orgForm.department = ''
-  orgForm.assigned_employee = ''
   orgBranches.value = []
   orgDepartments.value = []
-  orgEmployees.value = []
   if (!orgForm.company) return
   const { data } = await listBranches({ company: orgForm.company, page_size: 200 })
-  orgBranches.value = data.results
+  orgBranches.value = data.results || []
 }
 
 async function onOrgBranchChange() {
   orgForm.department = ''
-  orgForm.assigned_employee = ''
   orgDepartments.value = []
-  orgEmployees.value = []
   if (!orgForm.branch) return
   const { data } = await listDepartments({ branch: orgForm.branch, page_size: 200 })
-  orgDepartments.value = data.results
+  orgDepartments.value = data.results || []
 }
 
 async function onOrgDepartmentChange() {
-  orgForm.assigned_employee = ''
-  orgEmployees.value = []
   if (!orgForm.department) return
   const { data } = await listEmployees({ department: orgForm.department, page_size: 200 })
-  orgEmployees.value = data.results
+  orgEmployees.value = data.results || []
 }
 
 async function startEditOrg() {
   orgErrorMessage.value = ''
   isEditingOrg.value = true
   orgForm.company = device.value.company_id || ''
-  orgForm.branch = ''
-  orgForm.department = ''
-  orgForm.assigned_employee = ''
+  orgForm.branch = device.value.branch_id || ''
+  orgForm.department = device.value.department_id || ''
+  orgForm.assigned_employee = device.value.assigned_employee_id || ''
   orgBranches.value = []
   orgDepartments.value = []
-  orgEmployees.value = []
+
+  // Pre-load all employees so admin can select immediately
+  const empAllRes = await listEmployees({ page_size: 500 })
+  allOrgEmployees.value = empAllRes.data.results || []
 
   const { data } = await listCompanies({ page_size: 200 })
-  orgCompanies.value = data.results
+  orgCompanies.value = data.results || []
 
   if (orgForm.company) {
     const branchRes = await listBranches({ company: orgForm.company, page_size: 200 })
-    orgBranches.value = branchRes.data.results
-    orgForm.branch = device.value.branch_id || ''
+    orgBranches.value = branchRes.data.results || []
   }
   if (orgForm.branch) {
     const deptRes = await listDepartments({ branch: orgForm.branch, page_size: 200 })
-    orgDepartments.value = deptRes.data.results
-    orgForm.department = device.value.department_id || ''
-  }
-  if (orgForm.department) {
-    const empRes = await listEmployees({ department: orgForm.department, page_size: 200 })
-    orgEmployees.value = empRes.data.results
-    orgForm.assigned_employee = device.value.assigned_employee_id || ''
+    orgDepartments.value = deptRes.data.results || []
   }
 }
 
@@ -887,21 +892,22 @@ async function handleRotateToken() {
               <div v-else class="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
                 <div class="grid grid-cols-1 gap-3 sm:grid-cols-4">
                   <div>
-                    <label class="mb-1 block text-xs font-medium text-slate-600">Company</label>
+                    <label class="mb-1 block text-xs font-semibold text-brand-700">Pilih Karyawan</label>
                     <select
-                      v-model="orgForm.company"
-                      class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                      @change="onOrgCompanyChange"
+                      v-model="orgForm.assigned_employee"
+                      class="w-full rounded-md border border-brand-300 bg-white px-2 py-1.5 text-sm font-medium focus:border-brand-500 focus:outline-none"
+                      @change="onOrgEmployeeChange"
                     >
-                      <option value="">Tidak diisi</option>
-                      <option v-for="c in orgCompanies" :key="c.id" :value="c.id">{{ c.name }}</option>
+                      <option value="">-- Pilih Karyawan --</option>
+                      <option v-for="e in allOrgEmployees" :key="e.id" :value="e.id">
+                        {{ e.full_name }} — {{ e.branch_name || 'Kantor' }} ({{ e.department_name || e.position || 'Staff' }})
+                      </option>
                     </select>
                   </div>
                   <div>
-                    <label class="mb-1 block text-xs font-medium text-slate-600">Branch</label>
+                    <label class="mb-1 block text-xs font-medium text-slate-600">Cabang (Branch)</label>
                     <select
                       v-model="orgForm.branch"
-                      :disabled="!orgForm.company"
                       class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-100 disabled:text-slate-400"
                       @change="onOrgBranchChange"
                     >
@@ -910,10 +916,9 @@ async function handleRotateToken() {
                     </select>
                   </div>
                   <div>
-                    <label class="mb-1 block text-xs font-medium text-slate-600">Department</label>
+                    <label class="mb-1 block text-xs font-medium text-slate-600">Departemen (Unit Kerja)</label>
                     <select
                       v-model="orgForm.department"
-                      :disabled="!orgForm.branch"
                       class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-100 disabled:text-slate-400"
                       @change="onOrgDepartmentChange"
                     >
@@ -922,14 +927,14 @@ async function handleRotateToken() {
                     </select>
                   </div>
                   <div>
-                    <label class="mb-1 block text-xs font-medium text-slate-600">Karyawan</label>
+                    <label class="mb-1 block text-xs font-medium text-slate-600">Perusahaan (PT)</label>
                     <select
-                      v-model="orgForm.assigned_employee"
-                      :disabled="!orgForm.department"
-                      class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-100 disabled:text-slate-400"
+                      v-model="orgForm.company"
+                      class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                      @change="onOrgCompanyChange"
                     >
                       <option value="">Tidak diisi</option>
-                      <option v-for="e in orgEmployees" :key="e.id" :value="e.id">{{ e.full_name }}</option>
+                      <option v-for="c in orgCompanies" :key="c.id" :value="c.id">{{ c.name }}</option>
                     </select>
                   </div>
                 </div>

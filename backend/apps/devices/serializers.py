@@ -114,11 +114,28 @@ class EmployeeSerializer(serializers.ModelSerializer):
     department = serializers.PrimaryKeyRelatedField(
         queryset=Department.objects.all(), required=False, allow_null=True
     )
+    department_name = serializers.CharField(source="department.name", read_only=True, default=None)
+    branch_id = serializers.IntegerField(source="department.branch.id", read_only=True, default=None)
+    branch_name = serializers.CharField(source="department.branch.name", read_only=True, default=None)
+    company_id = serializers.IntegerField(source="department.branch.company.id", read_only=True, default=None)
+    company_name = serializers.CharField(source="department.branch.company.name", read_only=True, default=None)
     department_label = serializers.CharField(source="department.__str__", read_only=True, default=None)
 
     class Meta:
         model = Employee
-        fields = ["id", "department", "department_label", "full_name", "email", "position"]
+        fields = [
+            "id",
+            "department",
+            "department_name",
+            "branch_id",
+            "branch_name",
+            "company_id",
+            "company_name",
+            "department_label",
+            "full_name",
+            "email",
+            "position",
+        ]
 
 
 class DeviceAssetSummarySerializer(serializers.ModelSerializer):
