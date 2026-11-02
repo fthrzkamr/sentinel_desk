@@ -34,8 +34,14 @@ from networking.client import (
 from screen.signaling_client import LiveScreenAgent
 from services import autostart, hardening
 from services.secure_storage import load_credentials, save_credentials
+from services.updater import (
+    apply_update,
+    cleanup_old_update_file,
+    download_and_verify_binary,
+    is_newer_version,
+)
 
-AGENT_VERSION = "0.8.15"
+AGENT_VERSION = "0.8.17"
 MAX_BACKOFF_SECONDS = 300
 SOFTWARE_SYNC_INTERVAL_SECONDS = 3600  # software list changes rarely — no need to resend every cycle
 LOCATION_SYNC_INTERVAL_SECONDS = 900  # 15 min — frequent enough to track a moving laptop, not spammy
@@ -129,28 +135,32 @@ def poll_usb(
 ):
     connected, disconnected = watcher.poll()
     for event in connected:
-        send_usb_event(config, device_id, device_token, {"event": "connected", **event})
-        logger.info("USB connected - %s (%s)", event["label"] or event["drive_letter"], event["drive_letter"])
         if file_activity_watcher:
             file_activity_watcher.track_removable(event["drive_letter"])
+        send_usb_event(config, device_id, device_token, {"event": "connected", **event})
+        watcher.acknowledge_connected(event["drive_letter"], event["label"], event["serial"])
+        logger.info("USB connected - %s (%s)", event["label"] or event["drive_letter"], event["drive_letter"])
     for drive_letter in disconnected:
-        send_usb_event(config, device_id, device_token, {"event": "disconnected", "drive_letter": drive_letter})
-        logger.info("USB disconnected - %s", drive_letter)
         if file_activity_watcher:
             file_activity_watcher.untrack_removable(drive_letter)
+        send_usb_event(config, device_id, device_token, {"event": "disconnected", "drive_letter": drive_letter})
+        watcher.acknowledge_disconnected(drive_letter)
+        logger.info("USB disconnected - %s", drive_letter)
 
 
 def sync_app_usage(config: AgentConfig, device_id: str, device_token: str, tracker: AppUsageTracker):
-    items = tracker.flush()
+    items = tracker.pending()
     if items:
         send_app_usage(config, device_id, device_token, items)
+        tracker.clear()
         logger.info("App usage synced - %s app(s)", len(items))
 
 
 def sync_idle_activity(config: AgentConfig, device_id: str, device_token: str, tracker: IdleActivityTracker):
-    items = tracker.flush()
+    items = tracker.pending()
     if items:
         send_idle_activity(config, device_id, device_token, items)
+        tracker.clear()
         logger.info("Idle activity synced - %s day(s)", len(items))
 
 
@@ -158,6 +168,7 @@ def sync_browsing_history(config: AgentConfig, device_id: str, device_token: str
     items = tracker.collect_new_entries()
     if items:
         send_browsing_history(config, device_id, device_token, items)
+        tracker.mark_synced()
         logger.info("Browsing history synced - %s entr(ies)", len(items))
 
 
@@ -165,6 +176,7 @@ def sync_file_activity(config: AgentConfig, device_id: str, device_token: str, w
     items = watcher.poll()
     if items:
         send_file_activity(config, device_id, device_token, items)
+        watcher.clear_pending()
         logger.info("File activity synced - %s event(s)", len(items))
 
 
@@ -172,6 +184,7 @@ def sync_system_errors(config: AgentConfig, device_id: str, device_token: str, t
     items = tracker.collect_new_entries()
     if items:
         send_system_errors(config, device_id, device_token, items)
+        tracker.mark_synced()
         logger.info("System errors synced - %s entr(ies)", len(items))
 
 
@@ -206,11 +219,61 @@ def _cleanup_stale_runtime_extractions() -> None:
             pass
 
 
+def _apply_remote_policy(
+    policy: dict,
+    config: AgentConfig,
+    trackers: dict,
+    device_id: str,
+    device_token: str,
+) -> None:
+    interval = policy.get("metrics_interval_seconds")
+    if interval and isinstance(interval, int) and 5 <= interval <= 300:
+        if interval != config.monitor_interval:
+            logger.info("Remote policy updated monitor interval: %ss -> %ss", config.monitor_interval, interval)
+            config.monitor_interval = interval
+
+    screen_enabled = policy.get("screen_monitor_enabled")
+    if screen_enabled is not None and screen_enabled != config.screen_monitor_enabled:
+        config.screen_monitor_enabled = screen_enabled
+        logger.info("Remote policy changed screen monitoring to %s", screen_enabled)
+        if screen_enabled:
+            if not trackers["live_screen"]:
+                agent = LiveScreenAgent(config.server_url, device_id, device_token)
+                agent.start_in_background()
+                trackers["live_screen"] = agent
+        else:
+            if trackers["live_screen"]:
+                trackers["live_screen"].stop()
+                trackers["live_screen"] = None
+
+    flag_map = [
+        ("usb_monitor_enabled", "usb", UsbWatcher),
+        ("app_usage_monitor_enabled", "app_usage", AppUsageTracker),
+        ("browser_history_monitor_enabled", "browser_history", BrowserHistoryTracker),
+        ("file_activity_monitor_enabled", "file_activity", FileActivityWatcher),
+        ("idle_activity_monitor_enabled", "idle_activity", IdleActivityTracker),
+        ("system_error_monitor_enabled", "system_error", SystemErrorTracker),
+    ]
+    for key, tracker_key, cls in flag_map:
+        val = policy.get(key)
+        if val is not None and val != getattr(config, key, None):
+            setattr(config, key, val)
+            logger.info("Remote policy changed %s to %s", key, val)
+            if val and not trackers[tracker_key]:
+                try:
+                    trackers[tracker_key] = cls()
+                except Exception as exc:
+                    logger.warning("Could not initialize %s tracker (%s)", tracker_key, exc)
+            elif not val and trackers[tracker_key]:
+                trackers[tracker_key] = None
+
+
 def run():
     _configure_file_logging()
     signal.signal(signal.SIGINT, _handle_shutdown_signal)
     signal.signal(signal.SIGTERM, _handle_shutdown_signal)
     _cleanup_stale_runtime_extractions()
+    cleanup_old_update_file()
 
     config = AgentConfig.load()
     logger.info("SentinelDesk Agent starting (server=%s)", config.server_url)
@@ -247,12 +310,15 @@ def run():
         logger.warning("Initial location sync failed (%s), will retry later", exc)
     last_location_sync = time.monotonic()
 
-    usb_watcher = UsbWatcher() if config.usb_monitor_enabled else None
-    app_usage_tracker = AppUsageTracker() if config.app_usage_monitor_enabled else None
-    browser_history_tracker = BrowserHistoryTracker() if config.browser_history_monitor_enabled else None
-    file_activity_watcher = FileActivityWatcher() if config.file_activity_monitor_enabled else None
-    idle_activity_tracker = IdleActivityTracker() if config.idle_activity_monitor_enabled else None
-    system_error_tracker = SystemErrorTracker() if config.system_error_monitor_enabled else None
+    trackers = {
+        "usb": UsbWatcher() if config.usb_monitor_enabled else None,
+        "app_usage": AppUsageTracker() if config.app_usage_monitor_enabled else None,
+        "browser_history": BrowserHistoryTracker() if config.browser_history_monitor_enabled else None,
+        "file_activity": FileActivityWatcher() if config.file_activity_monitor_enabled else None,
+        "idle_activity": IdleActivityTracker() if config.idle_activity_monitor_enabled else None,
+        "system_error": SystemErrorTracker() if config.system_error_monitor_enabled else None,
+        "live_screen": live_screen_agent,
+    }
     for enabled, name in [
         (config.usb_monitor_enabled, "USB"),
         (config.app_usage_monitor_enabled, "App usage"),
@@ -312,13 +378,41 @@ def run():
             hardware_details_sent = True
             logger.info(
                 "Metrics OK - status=%s cpu=%s%% ram=%s%% disk=%s%%",
-                result["status"],
+                result.get("status"),
                 metrics["cpu_percent"],
                 metrics["ram_percent"],
                 metrics["disk_percent"],
             )
+
+            if isinstance(result, dict):
+                if "policy" in result and isinstance(result["policy"], dict):
+                    _apply_remote_policy(result["policy"], config, trackers, device_id, device_token)
+
+                update_info = result.get("update")
+                if update_info and isinstance(update_info, dict):
+                    latest_ver = update_info.get("latest_version", "")
+                    download_url = update_info.get("download_url", "")
+                    sha256_hash = update_info.get("sha256", "")
+                    if latest_ver and download_url and sha256_hash and is_newer_version(latest_ver, AGENT_VERSION):
+                        logger.info("New agent update available: %s (current: %s)", latest_ver, AGENT_VERSION)
+                        update_dest = AGENT_DIR / "updates" / f"SentinelDeskAgent-{latest_ver}.exe"
+                        if download_and_verify_binary(
+                            download_url,
+                            sha256_hash,
+                            config.server_url,
+                            device_id,
+                            device_token,
+                            update_dest,
+                        ):
+                            apply_update(update_dest)
+
             backoff = 1
         except Exception as exc:  # noqa: BLE001 - any network/HTTP failure should trigger reconnect+backoff
+            err_msg = str(exc)
+            if "pending admin approval" in err_msg.lower():
+                logger.info("Perangkat menunggu persetujuan (Pending Approval) oleh Admin di dashboard. Menunggu...")
+                time.sleep(10)
+                continue
             logger.warning("Sending metrics failed (%s), retrying in %ss", exc, backoff)
             time.sleep(backoff)
             backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
@@ -338,55 +432,55 @@ def run():
                 logger.warning("Location sync failed (%s), will retry next interval", exc)
             last_location_sync = time.monotonic()
 
-        if usb_watcher:
+        if trackers["usb"]:
             try:
-                poll_usb(config, device_id, device_token, usb_watcher, file_activity_watcher)
+                poll_usb(config, device_id, device_token, trackers["usb"], trackers["file_activity"])
             except Exception as exc:  # noqa: BLE001 - don't let this break the metrics loop
                 logger.warning("USB polling failed (%s)", exc)
 
-        if app_usage_tracker:
-            app_usage_tracker.sample()
+        if trackers["app_usage"]:
+            trackers["app_usage"].sample()
             if time.monotonic() - last_app_usage_sync >= APP_USAGE_SYNC_INTERVAL_SECONDS:
                 try:
-                    sync_app_usage(config, device_id, device_token, app_usage_tracker)
+                    sync_app_usage(config, device_id, device_token, trackers["app_usage"])
                 except Exception as exc:  # noqa: BLE001 - don't let this break the metrics loop
                     logger.warning("App usage sync failed (%s), will retry next interval", exc)
                 last_app_usage_sync = time.monotonic()
 
-        if idle_activity_tracker:
-            idle_activity_tracker.sample()
+        if trackers["idle_activity"]:
+            trackers["idle_activity"].sample()
             if time.monotonic() - last_idle_activity_sync >= IDLE_ACTIVITY_SYNC_INTERVAL_SECONDS:
                 try:
-                    sync_idle_activity(config, device_id, device_token, idle_activity_tracker)
+                    sync_idle_activity(config, device_id, device_token, trackers["idle_activity"])
                 except Exception as exc:  # noqa: BLE001 - don't let this break the metrics loop
                     logger.warning("Idle activity sync failed (%s), will retry next interval", exc)
                 last_idle_activity_sync = time.monotonic()
 
-        if browser_history_tracker and time.monotonic() - last_browser_history_sync >= BROWSER_HISTORY_SYNC_INTERVAL_SECONDS:
+        if trackers["browser_history"] and time.monotonic() - last_browser_history_sync >= BROWSER_HISTORY_SYNC_INTERVAL_SECONDS:
             try:
-                sync_browsing_history(config, device_id, device_token, browser_history_tracker)
+                sync_browsing_history(config, device_id, device_token, trackers["browser_history"])
             except Exception as exc:  # noqa: BLE001 - don't let this break the metrics loop
                 logger.warning("Browsing history sync failed (%s), will retry next interval", exc)
             last_browser_history_sync = time.monotonic()
 
-        if file_activity_watcher and time.monotonic() - last_file_activity_sync >= FILE_ACTIVITY_SYNC_INTERVAL_SECONDS:
+        if trackers["file_activity"] and time.monotonic() - last_file_activity_sync >= FILE_ACTIVITY_SYNC_INTERVAL_SECONDS:
             try:
-                sync_file_activity(config, device_id, device_token, file_activity_watcher)
+                sync_file_activity(config, device_id, device_token, trackers["file_activity"])
             except Exception as exc:  # noqa: BLE001 - don't let this break the metrics loop
                 logger.warning("File activity sync failed (%s), will retry next interval", exc)
             last_file_activity_sync = time.monotonic()
 
-        if system_error_tracker and time.monotonic() - last_system_error_sync >= SYSTEM_ERROR_SYNC_INTERVAL_SECONDS:
+        if trackers["system_error"] and time.monotonic() - last_system_error_sync >= SYSTEM_ERROR_SYNC_INTERVAL_SECONDS:
             try:
-                sync_system_errors(config, device_id, device_token, system_error_tracker)
+                sync_system_errors(config, device_id, device_token, trackers["system_error"])
             except Exception as exc:  # noqa: BLE001 - don't let this break the metrics loop
                 logger.warning("System error sync failed (%s), will retry next interval", exc)
             last_system_error_sync = time.monotonic()
 
         time.sleep(config.monitor_interval)
 
-    if live_screen_agent:
-        live_screen_agent.stop()
+    if trackers["live_screen"]:
+        trackers["live_screen"].stop()
     logger.info("SentinelDesk Agent stopped gracefully.")
     # The live-screen signaling/WebRTC background threads can block a clean
     # interpreter exit on Windows even after every other thread is done.

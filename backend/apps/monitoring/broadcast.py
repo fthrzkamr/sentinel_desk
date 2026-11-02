@@ -12,3 +12,31 @@ def broadcast_dashboard_event(event_type: str, payload: dict):
         DASHBOARD_GROUP,
         {"type": "dashboard.event", "event_type": event_type, "payload": payload},
     )
+
+
+def broadcast_alert_triggered(alert):
+    if alert is None:
+        return
+    broadcast_dashboard_event(
+        "alert.triggered",
+        {
+            "id": alert.id,
+            "device_id": alert.device.device_id,
+            "category": alert.category,
+            "severity": alert.severity,
+            "message": alert.message,
+        },
+    )
+
+
+def broadcast_alert_updated(alert):
+    if alert is None:
+        return
+    broadcast_dashboard_event(
+        "alert.updated",
+        {
+            "id": alert.id,
+            "device_id": alert.device.device_id,
+            "status": alert.status,
+        },
+    )

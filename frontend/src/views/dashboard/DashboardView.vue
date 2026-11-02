@@ -1,9 +1,9 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import StatCard from '@/components/StatCard.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { listDevices } from '@/services/devices'
+import { getDashboardSummary, listDevices } from '@/services/devices'
 import { useAuthStore } from '@/stores/auth'
 import { useMonitoringStore } from '@/stores/monitoring'
 import { timeAgo } from '@/utils/time'
@@ -12,15 +12,29 @@ const auth = useAuthStore()
 const monitoring = useMonitoringStore()
 
 const devices = ref([])
+const summary = ref(null)
 const isLoading = ref(true)
 const errorMessage = ref('')
+
+async function fetchSummary() {
+  try {
+    const { data } = await getDashboardSummary()
+    summary.value = data
+  } catch {
+    // Non-fatal if summary fails independently
+  }
+}
 
 async function fetchDevices() {
   isLoading.value = true
   errorMessage.value = ''
   try {
-    const { data } = await listDevices({ page_size: 200 })
-    devices.value = data.results
+    const [devicesRes, summaryRes] = await Promise.all([
+      listDevices({ page_size: 200 }),
+      getDashboardSummary(),
+    ])
+    devices.value = devicesRes.data.results
+    summary.value = summaryRes.data
   } catch {
     errorMessage.value = 'Gagal memuat data device.'
   } finally {
@@ -29,6 +43,13 @@ async function fetchDevices() {
 }
 
 onMounted(fetchDevices)
+
+watch(
+  () => monitoring.lastAlertEventAt,
+  () => {
+    fetchSummary()
+  },
+)
 
 function liveFor(device) {
   return monitoring.liveDevices[device.device_id]
@@ -43,7 +64,26 @@ const mergedDevices = computed(() =>
 )
 
 const counts = computed(() => {
-  const result = { total: mergedDevices.value.length, ONLINE: 0, OFFLINE: 0, WARNING: 0, CRITICAL: 0, DISABLED: 0 }
+  if (summary.value?.status_counts) {
+    const result = { ...summary.value.status_counts }
+    for (const device of devices.value) {
+      const liveStatus = liveFor(device)?.status
+      if (liveStatus && liveStatus !== device.status) {
+        if (result[device.status] !== undefined) result[device.status] = Math.max(0, result[device.status] - 1)
+        if (result[liveStatus] !== undefined) result[liveStatus] += 1
+      }
+    }
+    return result
+  }
+  const result = {
+    total: mergedDevices.value.length,
+    ONLINE: 0,
+    OFFLINE: 0,
+    WARNING: 0,
+    CRITICAL: 0,
+    DISABLED: 0,
+    pending_approval: 0,
+  }
   for (const device of mergedDevices.value) {
     if (result[device.status] !== undefined) result[device.status] += 1
   }
@@ -90,6 +130,21 @@ const greeting = computed(() => {
       </div>
     </div>
 
+    <div
+      v-if="counts.pending_approval > 0"
+      class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+    >
+      <div class="flex items-center gap-2">
+        <span class="inline-block h-2 w-2 rounded-full bg-amber-500"></span>
+        <span>
+          Terdapat <strong>{{ counts.pending_approval }}</strong> perangkat baru dari reusable token yang menunggu persetujuan admin.
+        </span>
+      </div>
+      <RouterLink to="/devices" class="text-xs font-semibold text-amber-900 underline hover:text-amber-700">
+        Tinjau di halaman Devices →
+      </RouterLink>
+    </div>
+
     <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
       <StatCard label="Devices" :value="counts.total" color="blue">
         <template #icon>
@@ -130,7 +185,6 @@ const greeting = computed(() => {
           </svg>
         </template>
       </StatCard>
-
     </div>
 
     <div class="rounded-xl bg-white shadow-sm ring-1 ring-slate-900/5">

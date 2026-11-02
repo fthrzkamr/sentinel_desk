@@ -2,6 +2,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from apps.accounts.models import Permission, Role, User
+from apps.accounts.totp import generate_current_totp_code
 from apps.audit.models import AuditLog
 
 
@@ -226,3 +227,47 @@ def test_manager_cannot_delete_a_superuser(user_manager):
     response = client.delete(f"/api/users/{superuser.id}/")
     assert response.status_code == 400
     assert User.objects.filter(pk=superuser.id).exists()
+
+
+@pytest.mark.django_db
+def test_two_factor_auth_lifecycle(user):
+    client = _client_for("alice")
+
+    # 1. Setup 2FA
+    setup_resp = client.get("/api/auth/2fa/setup/")
+    assert setup_resp.status_code == 200
+    secret = setup_resp.data["secret"]
+    assert "otpauth_url" in setup_resp.data
+
+    # 2. Verify with wrong code
+    verify_bad = client.post("/api/auth/2fa/verify/", {"code": "000000"})
+    assert verify_bad.status_code == 400
+
+    # 3. Verify with valid TOTP code
+    valid_code = generate_current_totp_code(secret)
+    verify_good = client.post("/api/auth/2fa/verify/", {"code": valid_code})
+    assert verify_good.status_code == 200
+    assert verify_good.data["totp_enabled"] is True
+
+    user.refresh_from_db()
+    assert user.totp_enabled is True
+    assert user.totp_secret == secret
+
+    # 4. Login requires 2FA now
+    anon = APIClient()
+    login_step1 = anon.post("/api/auth/login/", {"username": "alice", "password": "StrongPass123!"}, format="json")
+    assert login_step1.status_code == 200
+    assert login_step1.data["requires_2fa"] is True
+    pre_auth_token = login_step1.data["pre_auth_token"]
+
+    # 5. Complete 2FA login
+    current_code = generate_current_totp_code(secret)
+    login_step2 = anon.post("/api/auth/login/2fa/", {"pre_auth_token": pre_auth_token, "otp_code": current_code}, format="json")
+    assert login_step2.status_code == 200
+    assert "access" in login_step2.data
+
+    # 6. Disable 2FA
+    disable_resp = client.post("/api/auth/2fa/disable/", {"password": "StrongPass123!"}, format="json")
+    assert disable_resp.status_code == 200
+    user.refresh_from_db()
+    assert user.totp_enabled is False

@@ -451,6 +451,27 @@ def test_reusable_token_enrolled_device_starts_pending_approval(admin_user):
 
 
 @pytest.mark.django_db
+def test_auto_enroll_without_token_starts_pending_approval():
+    # Tokenless auto-registration: agent passes empty token or omits it entirely
+    response = APIClient().post(
+        "/api/agent/enroll/",
+        {"hostname": "AUTO-LAPTOP-01", "os_name": "Windows 11", "mac_address": "CC:DD:EE:11:22:33"},
+        format="json",
+    )
+
+    assert response.status_code == 201
+    assert "device_id" in response.data
+    assert "device_token" in response.data
+
+    device = Device.objects.get(device_id=response.data["device_id"])
+    assert device.hostname == "AUTO-LAPTOP-01"
+    assert device.is_approved is False
+    assert device.status == Device.Status.OFFLINE
+    assert DeviceCredential.objects.filter(device=device).exists()
+    assert AuditLog.objects.filter(action="device.registered", device_id=device.device_id).exists()
+
+
+@pytest.mark.django_db
 def test_reusable_token_enrolls_multiple_devices_without_being_consumed(admin_user):
     token, raw_token = EnrollmentToken.create_with_token(created_by=admin_user, ttl_minutes=60, is_reusable=True)
 
@@ -516,4 +537,196 @@ def test_approve_endpoint_flips_flag_and_requires_permission(admin_client, admin
     assert approved.status_code == 200
     assert Device.objects.get(device_id=device_id).is_approved is True
     assert AuditLog.objects.filter(action="device.approved", device_id=device_id).exists()
+
+
+@pytest.mark.django_db
+def test_dashboard_summary_returns_counts_compliance_and_high_risk_devices(admin_client):
+    from apps.alerts.models import Alert
+
+    compliant_device = Device.objects.create(
+        device_id="SD-LPT-000101",
+        hostname="LAPTOP-COMPLIANT",
+        status=Device.Status.ONLINE,
+        is_approved=True,
+        bitlocker_enabled=True,
+        firewall_enabled=True,
+        antivirus_enabled=True,
+        battery_design_capacity_mwh=50000,
+        battery_full_charge_capacity_mwh=45000,
+    )
+    risky_device = Device.objects.create(
+        device_id="SD-LPT-000102",
+        hostname="LAPTOP-RISKY",
+        status=Device.Status.CRITICAL,
+        is_approved=False,
+        bitlocker_enabled=False,
+        firewall_enabled=False,
+        antivirus_enabled=False,
+        battery_design_capacity_mwh=50000,
+        battery_full_charge_capacity_mwh=20000,
+    )
+    Device.objects.create(
+        device_id="SD-LPT-000103",
+        hostname="LAPTOP-DISABLED",
+        status=Device.Status.DISABLED,
+        is_approved=True,
+        bitlocker_enabled=False,
+        firewall_enabled=False,
+        antivirus_enabled=False,
+    )
+
+    Alert.objects.create(
+        device=risky_device,
+        category=Alert.Category.DATA_EXFIL,
+        severity=Alert.Severity.CRITICAL,
+        message="Exfil alert",
+    )
+
+    response = admin_client.get("/api/devices/dashboard-summary/")
+    assert response.status_code == 200
+
+    status_counts = response.data["status_counts"]
+    assert status_counts["total"] == 3
+    assert status_counts["ONLINE"] == 1
+    assert status_counts["CRITICAL"] == 1
+    assert status_counts["DISABLED"] == 1
+    assert status_counts["pending_approval"] == 1
+
+    compliance = response.data["compliance"]
+    assert compliance["active_total"] == 2  # excludes DISABLED
+    assert compliance["fully_compliant"] == 1
+    assert compliance["bitlocker_off"] == 1
+    assert compliance["firewall_off"] == 1
+    assert compliance["antivirus_off"] == 1
+    assert compliance["low_battery_health"] == 1
+
+    high_risk = response.data["high_risk_devices"]
+    assert len(high_risk) == 1
+    assert high_risk[0]["device_id"] == risky_device.device_id
+    assert high_risk[0]["score"] > 0
+    assert high_risk[0]["device_id"] != compliant_device.device_id
+
+
+@pytest.mark.django_db
+def test_heartbeat_and_metrics_deliver_remote_policy_and_ota_download(enrollment_token, tmp_path, settings):
+    import os
+    from apps.system_settings.models import SystemSettings
+
+    settings.MEDIA_ROOT = tmp_path
+
+    # Configure solo settings with custom remote policy and OTA
+    solo = SystemSettings.get_solo()
+    solo.agent_metrics_interval_seconds = 20
+    solo.agent_screen_monitor_enabled = True
+    solo.agent_usb_monitor_enabled = False
+    solo.agent_auto_update_enabled = True
+    solo.agent_latest_version = "0.8.16"
+    solo.agent_download_url = "/api/agent/download/0.8.16/"
+    solo.agent_sha256 = "dummyhash123"
+    solo.save()
+
+    _, raw_token = enrollment_token
+    enroll_resp = APIClient().post(
+        "/api/agent/enroll/", {"token": raw_token, "hostname": "LAPTOP-POLICY-TEST"}, format="json"
+    )
+    device_id = enroll_resp.data["device_id"]
+    device_token = enroll_resp.data["device_token"]
+
+    client = APIClient()
+    # 1. Heartbeat receives policy & update info
+    hb_resp = client.post(
+        "/api/agent/heartbeat/",
+        {"agent_version": "0.8.15"},
+        format="json",
+        HTTP_X_DEVICE_ID=device_id,
+        HTTP_AUTHORIZATION=f"DeviceToken {device_token}",
+    )
+    assert hb_resp.status_code == 200
+    assert "policy" in hb_resp.data
+    assert hb_resp.data["policy"]["metrics_interval_seconds"] == 20
+    assert hb_resp.data["policy"]["usb_monitor_enabled"] is False
+
+    assert "update" in hb_resp.data
+    assert hb_resp.data["update"]["latest_version"] == "0.8.16"
+    assert hb_resp.data["update"]["sha256"] == "dummyhash123"
+
+    # 2. Metrics receives policy & update info as well
+    metric_resp = client.post(
+        "/api/agent/metrics/",
+        {"cpu_percent": 15, "ram_percent": 30, "disk_percent": 40},
+        format="json",
+        HTTP_X_DEVICE_ID=device_id,
+        HTTP_AUTHORIZATION=f"DeviceToken {device_token}",
+    )
+    assert metric_resp.status_code == 201
+    assert "policy" in metric_resp.data
+    assert metric_resp.data["policy"]["metrics_interval_seconds"] == 20
+
+    # 3. Test AgentDownloadView
+    dest_dir = tmp_path / "agent"
+    os.makedirs(dest_dir, exist_ok=True)
+    binary_file = dest_dir / "SentinelDeskAgent-0.8.16.exe"
+    binary_file.write_bytes(b"FakeAgentBinaryForTesting")
+
+    dl_resp = client.get(
+        "/api/agent/download/0.8.16/",
+        HTTP_X_DEVICE_ID=device_id,
+        HTTP_AUTHORIZATION=f"DeviceToken {device_token}",
+    )
+    assert dl_resp.status_code == 200
+    assert b"".join(dl_resp.streaming_content) == b"FakeAgentBinaryForTesting"
+
+
+@pytest.mark.django_db
+def test_device_token_rotation_by_admin_and_agent(admin_client, enrollment_token):
+    _, raw_token = enrollment_token
+    enroll_resp = APIClient().post(
+        "/api/agent/enroll/", {"token": raw_token, "hostname": "LAPTOP-ROTATE"}, format="json"
+    )
+    device_id = enroll_resp.data["device_id"]
+    initial_device_token = enroll_resp.data["device_token"]
+
+    # 1. Admin rotates token
+    rotate_resp = admin_client.post(f"/api/devices/{device_id}/rotate-token/")
+    assert rotate_resp.status_code == 200
+    new_token_1 = rotate_resp.data["device_token"]
+    assert new_token_1 != initial_device_token
+    assert AuditLog.objects.filter(action="device.token_rotated", device_id=device_id).exists()
+
+    # Old token no longer works
+    client = APIClient()
+    hb_fail = client.post(
+        "/api/agent/heartbeat/",
+        HTTP_X_DEVICE_ID=device_id,
+        HTTP_AUTHORIZATION=f"DeviceToken {initial_device_token}",
+    )
+    assert hb_fail.status_code == 401
+
+    # New token works
+    hb_ok = client.post(
+        "/api/agent/heartbeat/",
+        HTTP_X_DEVICE_ID=device_id,
+        HTTP_AUTHORIZATION=f"DeviceToken {new_token_1}",
+    )
+    assert hb_ok.status_code == 200
+
+    # 2. Agent rotates own token
+    agent_rotate_resp = client.post(
+        "/api/agent/rotate-token/",
+        HTTP_X_DEVICE_ID=device_id,
+        HTTP_AUTHORIZATION=f"DeviceToken {new_token_1}",
+    )
+    assert agent_rotate_resp.status_code == 200
+    new_token_2 = agent_rotate_resp.data["device_token"]
+    assert new_token_2 != new_token_1
+
+    # Now new_token_2 works
+    hb_ok2 = client.post(
+        "/api/agent/heartbeat/",
+        HTTP_X_DEVICE_ID=device_id,
+        HTTP_AUTHORIZATION=f"DeviceToken {new_token_2}",
+    )
+    assert hb_ok2.status_code == 200
+
+
 

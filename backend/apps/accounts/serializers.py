@@ -29,6 +29,7 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "role",
             "permissions",
+            "totp_enabled",
             "is_active",
             "is_superuser",
             "date_joined",
@@ -80,6 +81,7 @@ class PasswordResetSerializer(serializers.Serializer):
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField(write_only=True, trim_whitespace=False)
+    otp_code = serializers.CharField(required=False, allow_blank=True, default="")
 
     def validate(self, attrs):
         request = self.context.get("request")

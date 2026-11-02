@@ -6,6 +6,7 @@ import api from '@/services/api'
 import { linkAsset, listAssets, listDevices, setAssetUser } from '@/services/devices'
 import { listEmployees } from '@/services/organization'
 import { useAuthStore } from '@/stores/auth'
+import { downloadCsv } from '@/utils/csv'
 
 const PAGE_SIZE = 25
 
@@ -13,6 +14,7 @@ const auth = useAuthStore()
 
 const rows = ref([])
 const isLoading = ref(true)
+const isExporting = ref(false)
 const errorMessage = ref('')
 const search = ref('')
 const matchStatusFilter = ref('')
@@ -68,6 +70,33 @@ function goPrevious() {
   if (!previousUrl.value) return
   currentPage.value -= 1
   fetchAssets(previousUrl.value)
+}
+
+async function exportCsv() {
+  isExporting.value = true
+  try {
+    const { data } = await listAssets({
+      search: search.value || undefined,
+      match_status: matchStatusFilter.value || undefined,
+      page_size: 500,
+    })
+    downloadCsv('assets.csv', data.results || [], [
+      { header: 'Kode Asset', value: (r) => r.asset_code },
+      { header: 'Nama Aset', value: (r) => r.nama_aset || '' },
+      { header: 'Merk', value: (r) => r.merk || '' },
+      { header: 'Spesifikasi', value: (r) => r.spesifikasi || '' },
+      { header: 'Pengguna Saat Ini', value: (r) => r.current_employee || '' },
+      { header: 'Penanggung Jawab (asset_dfm)', value: (r) => r.raw_penanggung_jawab || '' },
+      { header: 'Lokasi (asset_dfm)', value: (r) => r.raw_lokasi || '' },
+      { header: 'Kondisi', value: (r) => r.kondisi || '' },
+      { header: 'Status Barang', value: (r) => r.status_barang || '' },
+      { header: 'Device ID Tertaut', value: (r) => r.device_id || '' },
+      { header: 'Hostname Device', value: (r) => r.device_hostname || '' },
+      { header: 'Status Match', value: (r) => MATCH_STATUS_LABEL[r.match_status] || r.match_status },
+    ])
+  } finally {
+    isExporting.value = false
+  }
 }
 
 let searchDebounce = null
@@ -240,6 +269,13 @@ async function unlinkAsset(asset) {
           <option value="">Semua Status</option>
           <option v-for="opt in MATCH_STATUS_OPTIONS" :key="opt" :value="opt">{{ MATCH_STATUS_LABEL[opt] }}</option>
         </select>
+        <button
+          :disabled="isExporting || rows.length === 0"
+          class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          @click="exportCsv"
+        >
+          {{ isExporting ? 'Mengekspor...' : 'Export CSV' }}
+        </button>
       </div>
     </div>
 

@@ -24,6 +24,7 @@ from apps.alerts.services import (
 from apps.alerts.url_analysis import classify_url
 from apps.devices.authentication import DeviceTokenAuthentication, IsDevice
 from apps.devices.models import Device
+from apps.monitoring.broadcast import broadcast_alert_triggered, broadcast_alert_updated
 
 from .models import AppUsage, BrowsingHistoryEntry, FileActivityEvent, IdleActivityStat, SystemErrorEvent
 from .serializers import (
@@ -69,7 +70,9 @@ class AgentAppUsageSyncView(APIView):
         # sync just happened, on a 5-minute interval) is a close enough proxy
         # for when the usage occurred to bucket it into an hour-of-day check.
         if items:
-            check_out_of_hours_activity(device, timezone.now(), f"App usage: {items[0]['app_name']}")
+            broadcast_alert_triggered(
+                check_out_of_hours_activity(device, timezone.now(), f"App usage: {items[0]['app_name']}")
+            )
 
         return Response(status=status.HTTP_201_CREATED)
 
@@ -125,10 +128,14 @@ class AgentBrowsingHistorySyncView(APIView):
         BrowsingHistoryEntry.objects.bulk_create(entries, ignore_conflicts=True)
 
         for item in items:
-            check_out_of_hours_activity(device, item["visited_at"], f"Browsing: {item['url'][:80]}")
+            broadcast_alert_triggered(
+                check_out_of_hours_activity(device, item["visited_at"], f"Browsing: {item['url'][:80]}")
+            )
             reasons = classify_url(item["url"])
             if reasons:
-                trigger_suspicious_url_alert(device, url=item["url"], title=item["title"], reasons=reasons)
+                broadcast_alert_triggered(
+                    trigger_suspicious_url_alert(device, url=item["url"], title=item["title"], reasons=reasons)
+                )
             if any(domain in item["url"] for domain in FILE_SHARING_DOMAINS):
                 ten_min_ago = item["visited_at"] - datetime.timedelta(minutes=10)
                 recent_count = FileActivityEvent.objects.filter(
@@ -138,7 +145,9 @@ class AgentBrowsingHistorySyncView(APIView):
                     occurred_at__gte=ten_min_ago,
                     occurred_at__lte=item["visited_at"],
                 ).count()
-                trigger_cloud_upload_alert(device, url=item["url"], recent_local_file_count=recent_count)
+                broadcast_alert_triggered(
+                    trigger_cloud_upload_alert(device, url=item["url"], recent_local_file_count=recent_count)
+                )
 
         return Response(status=status.HTTP_201_CREATED)
 
@@ -169,8 +178,10 @@ class AgentFileActivitySyncView(APIView):
         FileActivityEvent.objects.bulk_create(events)
 
         for item in items:
-            check_out_of_hours_activity(
-                device, item["occurred_at"], f"File {item['event_type'].lower()}: {item['path'][:80]}"
+            broadcast_alert_triggered(
+                check_out_of_hours_activity(
+                    device, item["occurred_at"], f"File {item['event_type'].lower()}: {item['path'][:80]}"
+                )
             )
             if item["source"] == FileActivityEvent.Source.USB and item["event_type"] in (
                 FileActivityEvent.EventType.CREATED,
@@ -181,8 +192,10 @@ class AgentFileActivitySyncView(APIView):
                 # the whole path as the drive label when there's no backslash.
                 drive_match = re.match(r"^[A-Za-z]:", item["path"])
                 drive_letter = drive_match.group(0) if drive_match else item["path"][:3]
-                trigger_data_exfil_alert(
-                    device, drive_letter=drive_letter, event_type=item["event_type"], path=item["path"]
+                broadcast_alert_triggered(
+                    trigger_data_exfil_alert(
+                        device, drive_letter=drive_letter, event_type=item["event_type"], path=item["path"]
+                    )
                 )
 
         return Response(status=status.HTTP_201_CREATED)
@@ -201,9 +214,11 @@ class AgentUsbEventView(APIView):
         device: Device = request.auth
 
         if data["event"] == "connected":
-            trigger_usb_alert(device, label=data["label"], drive_letter=data["drive_letter"], serial=data["serial"])
+            broadcast_alert_triggered(
+                trigger_usb_alert(device, label=data["label"], drive_letter=data["drive_letter"], serial=data["serial"])
+            )
         else:
-            resolve_usb_alert(device)
+            broadcast_alert_updated(resolve_usb_alert(device))
 
         return Response(status=status.HTTP_201_CREATED)
 
@@ -236,8 +251,10 @@ class AgentSystemErrorSyncView(APIView):
 
         for item in items:
             if item["level"] == SystemErrorEvent.Level.CRITICAL:
-                trigger_system_error_alert(
-                    device, provider=item["provider"], event_id=item["event_id"], message=item["message"]
+                broadcast_alert_triggered(
+                    trigger_system_error_alert(
+                        device, provider=item["provider"], event_id=item["event_id"], message=item["message"]
+                    )
                 )
 
         return Response(status=status.HTTP_201_CREATED)

@@ -13,7 +13,7 @@ import { listAppUsage, listBrowsingHistory, listFileActivity, listIdleActivity, 
 import { getDeviceRiskScore, listAlerts } from '@/services/alerts'
 import api from '@/services/api'
 import { listAuditLogs } from '@/services/audit'
-import { approveDevice, disableDevice, enableDevice, getDevice, updateDeviceOrgAssignment } from '@/services/devices'
+import { approveDevice, disableDevice, enableDevice, getDevice, rotateDeviceToken, updateDeviceOrgAssignment } from '@/services/devices'
 import { getDeviceLocationHistory } from '@/services/locations'
 import { getLatestMetric, getMetricHistory } from '@/services/monitoring'
 import { listBranches, listCompanies, listDepartments, listEmployees } from '@/services/organization'
@@ -684,6 +684,26 @@ async function handleApprove() {
     errorMessage.value = error.response?.data?.detail || 'Gagal approve device.'
   }
 }
+
+const isRotatingToken = ref(false)
+const rotatedTokenInfo = reactive({ open: false, token: '', deviceId: '' })
+
+async function handleRotateToken() {
+  if (!confirm(`Yakin ingin merotasi token untuk device ${device.value.device_id}? Token lama akan dinonaktifkan dan diganti dengan token baru.`)) {
+    return
+  }
+  isRotatingToken.value = true
+  try {
+    const { data } = await rotateDeviceToken(device.value.device_id)
+    rotatedTokenInfo.token = data.device_token
+    rotatedTokenInfo.deviceId = data.device_id
+    rotatedTokenInfo.open = true
+  } catch (error) {
+    errorMessage.value = error.response?.data?.detail || 'Gagal merotasi token perangkat.'
+  } finally {
+    isRotatingToken.value = false
+  }
+}
 </script>
 
 <template>
@@ -719,6 +739,14 @@ async function handleApprove() {
           </p>
         </div>
         <div class="flex gap-2">
+          <button
+            v-if="auth.hasPermission('agent.manage')"
+            :disabled="isRotatingToken"
+            class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            @click="handleRotateToken"
+          >
+            {{ isRotatingToken ? 'Merotasi...' : 'Rotasi Token' }}
+          </button>
           <button
             v-if="!device.is_approved && auth.hasPermission('device.disable')"
             class="rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700"
@@ -1757,6 +1785,43 @@ async function handleApprove() {
             @click="systemErrorDetail = null"
           >
             Tutup
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Hasil Rotasi Token -->
+    <div
+      v-if="rotatedTokenInfo.open"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
+    >
+      <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl ring-1 ring-slate-900/10">
+        <div class="mb-4 flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <div>
+            <h3 class="text-base font-semibold text-slate-800">Token Berhasil Dirotasi</h3>
+            <p class="text-xs text-slate-500">Device: {{ rotatedTokenInfo.deviceId }}</p>
+          </div>
+        </div>
+
+        <p class="text-xs text-slate-600 mb-3">
+          Token baru ini dibuat untuk menggantikan token sebelumnya. Pastikan untuk mencatat atau menyalinnya jika diperlukan:
+        </p>
+
+        <div class="relative mb-4 rounded-lg bg-slate-900 p-3 font-mono text-xs text-emerald-400 break-all select-all">
+          {{ rotatedTokenInfo.token }}
+        </div>
+
+        <div class="flex justify-end gap-2">
+          <button
+            class="rounded-md bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700"
+            @click="rotatedTokenInfo.open = false"
+          >
+            Selesai
           </button>
         </div>
       </div>

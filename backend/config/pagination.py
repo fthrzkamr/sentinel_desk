@@ -4,7 +4,7 @@ from rest_framework.utils.urls import remove_query_param, replace_query_param
 
 class DefaultPagination(PageNumberPagination):
     page_size_query_param = "page_size"
-    max_page_size = 200
+    max_page_size = 500
 
     # Deliberately relative (path + query only, no scheme/host): the dev
     # frontend reaches this API through Vite's proxy with changeOrigin=true,

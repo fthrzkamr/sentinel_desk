@@ -51,8 +51,8 @@ class AppUsageTracker:
 
         self._last_sample_at = now
 
-    def flush(self) -> list[dict]:
-        items = [
+    def pending(self) -> list[dict]:
+        return [
             {
                 "app_name": app_name,
                 "window_title": self._titles.get((app_name, date), ""),
@@ -62,6 +62,12 @@ class AppUsageTracker:
             for (app_name, date), seconds in self._durations.items()
             if seconds > 0
         ]
+
+    def clear(self) -> None:
         self._durations.clear()
         self._titles.clear()
+
+    def flush(self) -> list[dict]:
+        items = self.pending()
+        self.clear()
         return items

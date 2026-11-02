@@ -5,6 +5,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import HasPermission
 from apps.devices.models import Device
+from apps.devices.policy import get_ice_servers
 
 from . import presence
 
@@ -20,5 +21,6 @@ class LiveScreenStatusView(APIView):
                 "device_disabled": device.status == Device.Status.DISABLED,
                 "agent_online": presence.is_agent_online(device_id),
                 "being_viewed": presence.is_being_viewed(device_id),
+                "ice_servers": get_ice_servers(),
             }
         )

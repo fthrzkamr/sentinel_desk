@@ -159,6 +159,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.device_activity.tasks.prune_old_activity",
         "schedule": 3600.0,
     },
+    "prune-old-resolved-alerts": {
+        "task": "apps.alerts.tasks.prune_old_resolved_alerts",
+        "schedule": 3600.0,
+    },
+    "prune-old-audit-logs": {
+        "task": "apps.alerts.tasks.prune_old_audit_logs",
+        "schedule": 3600.0,
+    },
 }
 
 # --- Django REST Framework ---
@@ -224,6 +232,8 @@ DEVICE_METRIC_RETENTION_DAYS = env.int("DEVICE_METRIC_RETENTION_DAYS", default=7
 ACTIVITY_RETENTION_DAYS = env.int("ACTIVITY_RETENTION_DAYS", default=180)
 WORK_HOURS_START = env.int("WORK_HOURS_START", default=8)
 WORK_HOURS_END = env.int("WORK_HOURS_END", default=18)
+DATA_EXFIL_MIN_LOCAL_FILES = env.int("DATA_EXFIL_MIN_LOCAL_FILES", default=2)
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@sentineldesk.local")
 
 # Device status thresholds — CRITICAL takes priority over WARNING when both match.
 CPU_WARNING_PERCENT = env.float("CPU_WARNING_PERCENT", default=80)

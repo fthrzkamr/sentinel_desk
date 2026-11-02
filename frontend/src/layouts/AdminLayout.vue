@@ -25,7 +25,6 @@ const rawNavItems = [
   { label: 'Map', to: '/map', icon: 'map-pin', permission: 'location.view', section: 'Menu' },
   { label: 'Alerts', to: '/alerts', icon: 'bell', permission: 'alert.view', section: 'Manajemen' },
   { label: 'Assets', to: '/assets', icon: 'tag', permission: 'device.view', section: 'Manajemen' },
-  { label: 'Agents', to: '/agents', icon: 'cpu', permission: 'agent.manage', section: 'Manajemen' },
   { label: 'Users', to: '/users', icon: 'users', permission: 'user.manage', section: 'Manajemen' },
   { label: 'Audit Logs', to: '/audit-logs', icon: 'file-text', permission: 'audit.view', section: 'Sistem' },
   { label: 'Settings', to: '/settings', icon: 'sliders', permission: 'settings.manage', section: 'Sistem' },

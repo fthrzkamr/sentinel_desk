@@ -6,6 +6,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 
 from apps.accounts.ws_auth import get_user_from_token, user_has_permission
 from apps.audit.services import log_action
+from apps.devices.policy import get_ice_servers
 from apps.devices.ws_auth import get_device_from_token
 
 from . import presence
@@ -99,8 +100,14 @@ class AdminSignalConsumer(AsyncWebsocketConsumer):
         presence.mark_admin_viewing(self.device_id, self.channel_name)
         await alog(user=user, action="livescreen.started", device_id=self.device_id, metadata={})
 
+        ice_servers = await database_sync_to_async(get_ice_servers)()
+        await self.send(text_data=json.dumps({"type": "ice_config", "ice_servers": ice_servers}))
+
         agent_channel = presence.get_agent_channel(self.device_id)
-        await self.channel_layer.send(agent_channel, {"type": "relay.message", "payload": {"type": "viewer_joined"}})
+        await self.channel_layer.send(
+            agent_channel,
+            {"type": "relay.message", "payload": {"type": "viewer_joined", "ice_servers": ice_servers}},
+        )
 
     async def disconnect(self, close_code):
         if not getattr(self, "user", None):
@@ -119,6 +126,11 @@ class AdminSignalConsumer(AsyncWebsocketConsumer):
             message = json.loads(text_data)
         except ValueError:
             return
+
+        if message.get("type") == "remote_control_toggle":
+            enabled = bool(message.get("enabled", False))
+            action = "livescreen.control_enabled" if enabled else "livescreen.control_disabled"
+            await alog(user=self.user, action=action, device_id=self.device_id, metadata={})
 
         agent_channel = presence.get_agent_channel(self.device_id)
         if not agent_channel:

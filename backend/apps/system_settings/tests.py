@@ -102,3 +102,134 @@ def test_percent_fields_are_bounded_0_to_100(manager_user):
     client = _client_for("settings_admin")
     response = client.patch("/api/settings/", {"ram_warning_percent": 150}, format="json")
     assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_data_exfil_min_local_files_survives_cache_roundtrip(manager_user):
+    client = _client_for("settings_admin")
+    response = client.patch("/api/settings/", {"data_exfil_min_local_files": 5}, format="json")
+    assert response.status_code == 200
+    assert response.data["data_exfil_min_local_files"] == 5
+
+    # First call populates the Redis cache; second call reads from the cached dict
+    first = SystemSettings.get_solo()
+    second = SystemSettings.get_solo()
+    assert first.data_exfil_min_local_files == 5
+    assert second.data_exfil_min_local_files == 5
+
+
+@pytest.mark.django_db
+def test_telegram_fields_must_be_paired(manager_user):
+    client = _client_for("settings_admin")
+    resp = client.patch("/api/settings/", {"telegram_bot_token": "123:ABC", "telegram_chat_id": ""}, format="json")
+    assert resp.status_code == 400
+    assert "telegram_chat_id" in resp.data
+
+    ok = client.patch(
+        "/api/settings/", {"telegram_bot_token": "123:ABC", "telegram_chat_id": "-100999"}, format="json"
+    )
+    assert ok.status_code == 200
+
+
+@pytest.mark.django_db
+def test_notification_emails_validates_format(manager_user):
+    client = _client_for("settings_admin")
+    bad = client.patch("/api/settings/", {"notification_emails": "valid@example.com, not-an-email"}, format="json")
+    assert bad.status_code == 400
+    assert "notification_emails" in bad.data
+
+    good = client.patch(
+        "/api/settings/", {"notification_emails": "sec@example.com, admin@example.com"}, format="json"
+    )
+    assert good.status_code == 200
+    assert good.data["notification_emails"] == "sec@example.com, admin@example.com"
+
+
+@pytest.mark.django_db
+def test_test_notification_endpoint_requires_channel_and_dispatches(manager_user, mailoutbox, monkeypatch):
+    client = _client_for("settings_admin")
+
+    # No channel configured -> 400
+    empty_resp = client.post("/api/settings/test-notification/", {}, format="json")
+    assert empty_resp.status_code == 400
+
+    posted_webhooks = []
+
+    def fake_post_json(url, payload, timeout=10):
+        posted_webhooks.append((url, payload))
+
+    monkeypatch.setattr("apps.alerts.notifications._post_json", fake_post_json)
+
+    resp = client.post(
+        "/api/settings/test-notification/",
+        {
+            "telegram_bot_token": "123:TOKEN",
+            "telegram_chat_id": "-100123",
+            "webhook_url": "https://hooks.example.com/alert",
+            "notification_emails": "soc@example.com",
+        },
+        format="json",
+    )
+    assert resp.status_code == 200
+    assert set(resp.data["sent"]) == {"telegram", "webhook", "email"}
+    assert resp.data["errors"] == {}
+    assert len(posted_webhooks) == 2
+    assert len(mailoutbox) == 1
+    assert "Test Notification" in mailoutbox[0].subject
+    assert AuditLog.objects.filter(action="settings.test_notification_sent", user=manager_user).exists()
+
+
+@pytest.mark.django_db
+def test_agent_policy_fields_and_binary_upload_ota(manager_user, tmp_path, settings, monkeypatch):
+    import hashlib
+    from io import BytesIO
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    settings.MEDIA_ROOT = tmp_path
+    client = _client_for("settings_admin")
+
+    # 1. Update remote policy via PATCH
+    patch_resp = client.patch(
+        "/api/settings/",
+        {
+            "agent_metrics_interval_seconds": 25,
+            "agent_screen_monitor_enabled": False,
+            "agent_usb_monitor_enabled": True,
+        },
+        format="json",
+    )
+    assert patch_resp.status_code == 200
+    assert patch_resp.data["agent_metrics_interval_seconds"] == 25
+    assert patch_resp.data["agent_screen_monitor_enabled"] is False
+
+    solo = SystemSettings.get_solo()
+    assert solo.agent_metrics_interval_seconds == 25
+    assert solo.agent_screen_monitor_enabled is False
+
+    # 2. Upload binary agent
+    dummy_exe_content = b"MZSentinelDeskDummyBinaryContent12345"
+    expected_hash = hashlib.sha256(dummy_exe_content).hexdigest()
+    uploaded = SimpleUploadedFile("agent.exe", dummy_exe_content, content_type="application/octet-stream")
+
+    upload_resp = client.post(
+        "/api/settings/agent-binary/",
+        {"version": "0.8.16", "file": uploaded},
+        format="multipart",
+    )
+    assert upload_resp.status_code == 201
+    assert upload_resp.data["version"] == "0.8.16"
+    assert upload_resp.data["sha256"] == expected_hash
+    assert upload_resp.data["download_url"] == "/api/agent/download/0.8.16/"
+    assert upload_resp.data["auto_update_enabled"] is True
+
+    saved_file = tmp_path / "agent" / "SentinelDeskAgent-0.8.16.exe"
+    assert saved_file.exists()
+    assert saved_file.read_bytes() == dummy_exe_content
+
+    solo.refresh_from_db()
+    solo = SystemSettings.get_solo()
+    assert solo.agent_latest_version == "0.8.16"
+    assert solo.agent_sha256 == expected_hash
+    assert solo.agent_auto_update_enabled is True
+    assert AuditLog.objects.filter(action="agent.release_uploaded", user=manager_user).exists()
+

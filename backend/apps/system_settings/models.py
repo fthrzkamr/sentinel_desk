@@ -19,8 +19,37 @@ _CACHED_FIELDS = [
     "device_offline_threshold_seconds",
     "device_metric_retention_days",
     "activity_retention_days",
+    "data_exfil_min_local_files",
     "work_hours_start",
     "work_hours_end",
+    "notifications_enabled",
+    "telegram_bot_token",
+    "telegram_chat_id",
+    "webhook_url",
+    "notification_emails",
+    # Dynamic Agent Remote Policy (Tahap 4)
+    "agent_metrics_interval_seconds",
+    "agent_screen_monitor_enabled",
+    "agent_usb_monitor_enabled",
+    "agent_app_usage_monitor_enabled",
+    "agent_browser_history_monitor_enabled",
+    "agent_file_activity_monitor_enabled",
+    "agent_idle_activity_monitor_enabled",
+    "agent_system_error_monitor_enabled",
+    # Over-The-Air (OTA) Agent Auto-Update (Tahap 4)
+    "agent_auto_update_enabled",
+    "agent_latest_version",
+    "agent_download_url",
+    "agent_sha256",
+    # Live Screen WebRTC ICE / TURN Configuration (Tahap 5)
+    "stun_server_url",
+    "turn_server_enabled",
+    "turn_server_url",
+    "turn_username",
+    "turn_credential",
+    # Data Retention Policies (Tahap 6)
+    "alert_retention_days",
+    "audit_retention_days",
 ]
 
 
@@ -66,6 +95,40 @@ class SystemSettings(models.Model):
     # stronger signal than "touched one file, then opened Drive."
     data_exfil_min_local_files = models.PositiveSmallIntegerField(default=2)
 
+    # External notification channels for CRITICAL alerts (Tahap 2).
+    notifications_enabled = models.BooleanField(default=False)
+    telegram_bot_token = models.CharField(max_length=200, blank=True, default="")
+    telegram_chat_id = models.CharField(max_length=100, blank=True, default="")
+    webhook_url = models.URLField(max_length=500, blank=True, default="")
+    notification_emails = models.CharField(max_length=500, blank=True, default="")
+
+    # Dynamic Agent Remote Policy (Tahap 4)
+    agent_metrics_interval_seconds = models.PositiveIntegerField(default=15)
+    agent_screen_monitor_enabled = models.BooleanField(default=True)
+    agent_usb_monitor_enabled = models.BooleanField(default=True)
+    agent_app_usage_monitor_enabled = models.BooleanField(default=True)
+    agent_browser_history_monitor_enabled = models.BooleanField(default=True)
+    agent_file_activity_monitor_enabled = models.BooleanField(default=True)
+    agent_idle_activity_monitor_enabled = models.BooleanField(default=True)
+    agent_system_error_monitor_enabled = models.BooleanField(default=True)
+
+    # Over-The-Air (OTA) Agent Auto-Update (Tahap 4)
+    agent_auto_update_enabled = models.BooleanField(default=False)
+    agent_latest_version = models.CharField(max_length=50, blank=True, default="")
+    agent_download_url = models.CharField(max_length=500, blank=True, default="")
+    agent_sha256 = models.CharField(max_length=64, blank=True, default="")
+
+    # Live Screen WebRTC ICE / TURN Configuration (Tahap 5)
+    stun_server_url = models.CharField(max_length=255, blank=True, default="stun:stun.l.google.com:19302")
+    turn_server_enabled = models.BooleanField(default=False)
+    turn_server_url = models.CharField(max_length=255, blank=True, default="")
+    turn_username = models.CharField(max_length=150, blank=True, default="")
+    turn_credential = models.CharField(max_length=150, blank=True, default="")
+
+    # Data Retention Policies (Tahap 6)
+    alert_retention_days = models.PositiveIntegerField(default=60)
+    audit_retention_days = models.PositiveIntegerField(default=180)
+
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -109,8 +172,28 @@ class SystemSettings(models.Model):
                 "device_offline_threshold_seconds": settings.DEVICE_OFFLINE_THRESHOLD_SECONDS,
                 "device_metric_retention_days": settings.DEVICE_METRIC_RETENTION_DAYS,
                 "activity_retention_days": settings.ACTIVITY_RETENTION_DAYS,
+                "data_exfil_min_local_files": settings.DATA_EXFIL_MIN_LOCAL_FILES,
                 "work_hours_start": settings.WORK_HOURS_START,
                 "work_hours_end": settings.WORK_HOURS_END,
+                "agent_metrics_interval_seconds": 15,
+                "agent_screen_monitor_enabled": True,
+                "agent_usb_monitor_enabled": True,
+                "agent_app_usage_monitor_enabled": True,
+                "agent_browser_history_monitor_enabled": True,
+                "agent_file_activity_monitor_enabled": True,
+                "agent_idle_activity_monitor_enabled": True,
+                "agent_system_error_monitor_enabled": True,
+                "agent_auto_update_enabled": False,
+                "agent_latest_version": "",
+                "agent_download_url": "",
+                "agent_sha256": "",
+                "stun_server_url": "stun:stun.l.google.com:19302",
+                "turn_server_enabled": False,
+                "turn_server_url": "",
+                "turn_username": "",
+                "turn_credential": "",
+                "alert_retention_days": 60,
+                "audit_retention_days": 180,
             },
         )
         cache.set(CACHE_KEY, {field: getattr(obj, field) for field in _CACHED_FIELDS}, timeout=CACHE_TTL_SECONDS)

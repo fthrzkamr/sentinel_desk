@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    AgentDownloadView,
     AgentEnrollView,
     AgentHeartbeatView,
     AssetLinkView,
@@ -11,6 +12,7 @@ from .views import (
     BranchListCreateView,
     CompanyDetailView,
     CompanyListCreateView,
+    DashboardSummaryView,
     DepartmentDetailView,
     DepartmentListCreateView,
     DeviceApproveView,
@@ -19,18 +21,22 @@ from .views import (
     DeviceDisableView,
     DeviceEnableView,
     DeviceListView,
+    DeviceRotateTokenView,
     EmployeeDetailView,
     EmployeeListCreateView,
     EnrollmentTokenListCreateView,
     EnrollmentTokenRevokeView,
+    AgentRotateTokenView,
 )
 
 urlpatterns = [
     # Admin-facing
     path("devices/", DeviceListView.as_view(), name="device-list"),
+    path("devices/dashboard-summary/", DashboardSummaryView.as_view(), name="device-dashboard-summary"),
     path("devices/<str:device_id>/", DeviceDetailView.as_view(), name="device-detail"),
     path("devices/<str:device_id>/disable/", DeviceDisableView.as_view(), name="device-disable"),
     path("devices/<str:device_id>/enable/", DeviceEnableView.as_view(), name="device-enable"),
+    path("devices/<str:device_id>/rotate-token/", DeviceRotateTokenView.as_view(), name="device-rotate-token"),
     path("devices/<str:device_id>/approve/", DeviceApproveView.as_view(), name="device-approve"),
     path(
         "devices/<str:device_id>/asset-suggestions/",
@@ -59,6 +65,9 @@ urlpatterns = [
     # Agent-facing
     path("agent/enroll/", AgentEnrollView.as_view(), name="agent-enroll"),
     path("agent/heartbeat/", AgentHeartbeatView.as_view(), name="agent-heartbeat"),
+    path("agent/rotate-token/", AgentRotateTokenView.as_view(), name="agent-rotate-token"),
+    path("agent/download/<str:version>/", AgentDownloadView.as_view(), name="agent-download-version"),
+    path("agent/download/", AgentDownloadView.as_view(), name="agent-download-latest"),
     # Asset sync (asset_dfm integration)
     path("assets/sync/", AssetSyncView.as_view(), name="asset-sync"),
     path("assets/", AssetListView.as_view(), name="asset-list"),

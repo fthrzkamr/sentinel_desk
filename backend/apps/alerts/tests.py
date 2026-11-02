@@ -354,3 +354,99 @@ def test_suspicious_url_reuses_open_alert_instead_of_duplicating(device):
     assert second is None  # not "created" — the existing open alert was refreshed instead
     assert Alert.objects.filter(device=device, category=Alert.Category.SUSPICIOUS_URL).count() == 1
     assert Alert.objects.get(pk=first.pk).metadata["url"] == "http://192.168.1.50/b"
+
+
+@pytest.mark.django_db
+def test_critical_alert_enqueues_and_sends_external_notification(device, mailoutbox, monkeypatch):
+    from apps.alerts.tasks import send_critical_alert_notification_task
+    from apps.system_settings.models import SystemSettings
+
+    SystemSettings.objects.update_or_create(
+        pk=1,
+        defaults={
+            "notifications_enabled": True,
+            "notification_emails": "soc@example.com",
+        },
+    )
+
+    enqueued_ids = []
+    monkeypatch.setattr(
+        "apps.alerts.tasks.send_critical_alert_notification_task.delay",
+        lambda alert_id: enqueued_ids.append(alert_id),
+    )
+
+    # WARNING alert should not enqueue external critical notification
+    warning_alert = trigger_suspicious_url_alert(
+        device, url="http://192.168.1.50/login", title="Login", reasons=["host adalah alamat IP mentah"]
+    )
+    assert warning_alert.severity == Alert.Severity.WARNING
+    assert enqueued_ids == []
+
+    # Escalating the open WARNING alert to CRITICAL should enqueue notification
+    trigger_suspicious_url_alert(
+        device,
+        url="http://xn--pypal-4ve.ru/verify-login",
+        title="Phish",
+        reasons=["domain punycode/homograph", "meniru domain 'paypal'"],
+    )
+    assert enqueued_ids == [warning_alert.id]
+
+    # Running the task dispatches the email
+    result = send_critical_alert_notification_task(warning_alert.id)
+    assert result["sent"] == ["email"]
+    assert len(mailoutbox) == 1
+    assert device.device_id in mailoutbox[0].subject
+    assert "xn--pypal-4ve.ru" in mailoutbox[0].body
+
+
+@pytest.mark.django_db
+def test_prune_old_resolved_alerts_and_audit_logs(device):
+    from django.utils import timezone
+    from apps.alerts.tasks import prune_old_audit_logs, prune_old_resolved_alerts
+
+    now = timezone.now()
+    old_time = now - timezone.timedelta(days=90)
+    recent_time = now - timezone.timedelta(days=10)
+
+    # Old resolved alert -> should be pruned
+    Alert.objects.create(
+        device=device,
+        category=Alert.Category.CPU,
+        severity=Alert.Severity.WARNING,
+        status=Alert.Status.RESOLVED,
+        message="Old resolved",
+        resolved_at=old_time,
+    )
+    # Recent resolved alert -> should be kept
+    Alert.objects.create(
+        device=device,
+        category=Alert.Category.RAM,
+        severity=Alert.Severity.WARNING,
+        status=Alert.Status.RESOLVED,
+        message="Recent resolved",
+        resolved_at=recent_time,
+    )
+    # Open alert -> should never be pruned
+    Alert.objects.create(
+        device=device,
+        category=Alert.Category.DISK,
+        severity=Alert.Severity.CRITICAL,
+        status=Alert.Status.OPEN,
+        message="Still open",
+    )
+
+    deleted_alerts = prune_old_resolved_alerts()
+    assert deleted_alerts == 1
+    assert not Alert.objects.filter(message="Old resolved").exists()
+    assert Alert.objects.filter(message="Recent resolved").exists()
+    assert Alert.objects.filter(message="Still open").exists()
+
+    # Audit logs
+    log1 = AuditLog.objects.create(action="old_log")
+    AuditLog.objects.filter(pk=log1.pk).update(created_at=now - timezone.timedelta(days=200))
+    AuditLog.objects.create(action="recent_log")
+
+    deleted_logs = prune_old_audit_logs()
+    assert deleted_logs >= 1
+    assert not AuditLog.objects.filter(action="old_log").exists()
+    assert AuditLog.objects.filter(action="recent_log").exists()

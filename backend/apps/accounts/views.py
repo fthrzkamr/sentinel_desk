@@ -1,3 +1,5 @@
+from django.core import signing
+from django.core.cache import cache
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -18,6 +20,7 @@ from .serializers import (
     UserSerializer,
     UserUpdateSerializer,
 )
+from .totp import generate_totp_secret, get_totp_uri, verify_totp
 
 
 class LoginView(APIView):
@@ -36,6 +39,32 @@ class LoginView(APIView):
             return Response(serializer.errors, status=status.HTTP_401_UNAUTHORIZED)
 
         user = serializer.validated_data["user"]
+        otp_code = serializer.validated_data.get("otp_code", "").strip()
+
+        if user.totp_enabled:
+            if not otp_code:
+                pre_auth_token = signing.dumps({"user_id": user.pk}, salt="2fa_login", compress=True)
+                return Response(
+                    {
+                        "requires_2fa": True,
+                        "pre_auth_token": pre_auth_token,
+                        "message": "Autentikasi 2FA diperlukan. Masukkan kode 6-digit dari aplikasi autentikator Anda.",
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            if not verify_totp(user.totp_secret, otp_code):
+                log_action(
+                    action="auth.login_failed",
+                    request=request,
+                    user=user,
+                    metadata={"username": user.username, "reason": "invalid_totp_code"},
+                )
+                return Response(
+                    {"detail": "Kode OTP 2FA tidak valid atau telah kedaluwarsa."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+
         refresh = RefreshToken.for_user(user)
         log_action(user=user, action="auth.login", request=request)
 
@@ -46,6 +75,156 @@ class LoginView(APIView):
                 "user": UserSerializer(user).data,
             },
             status=status.HTTP_200_OK,
+        )
+
+
+class TwoFactorLoginView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
+
+    def post(self, request):
+        pre_auth_token = request.data.get("pre_auth_token")
+        otp_code = request.data.get("otp_code", "").strip()
+
+        if not pre_auth_token or not otp_code:
+            return Response(
+                {"detail": "pre_auth_token dan otp_code wajib diisi."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            data = signing.loads(pre_auth_token, salt="2fa_login", max_age=300)
+            user = User.objects.get(pk=data["user_id"])
+        except (signing.BadSignature, signing.SignatureExpired, User.DoesNotExist):
+            return Response(
+                {"detail": "Sesi verifikasi 2FA telah kedaluwarsa. Silakan coba login kembali."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if not user.is_active:
+            return Response(
+                {"detail": "Akun ini telah dinonaktifkan."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if not verify_totp(user.totp_secret, otp_code):
+            log_action(
+                action="auth.login_failed",
+                request=request,
+                user=user,
+                metadata={"username": user.username, "reason": "invalid_totp_code"},
+            )
+            return Response(
+                {"detail": "Kode OTP 2FA tidak valid atau telah kedaluwarsa."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        refresh = RefreshToken.for_user(user)
+        log_action(user=user, action="auth.login", request=request)
+
+        return Response(
+            {
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+                "user": UserSerializer(user).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class TwoFactorSetupView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        secret = generate_totp_secret()
+        cache.set(f"pending_totp:{request.user.pk}", secret, timeout=600)
+        otpauth_url = get_totp_uri(secret, request.user.username)
+        return Response(
+            {
+                "secret": secret,
+                "otpauth_url": otpauth_url,
+                "totp_enabled": request.user.totp_enabled,
+            }
+        )
+
+
+class TwoFactorVerifyView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        code = request.data.get("code", "").strip()
+        secret = cache.get(f"pending_totp:{request.user.pk}")
+        if not secret:
+            secret = request.data.get("secret", "").strip()
+
+        if not secret:
+            return Response(
+                {"detail": "Sesi penyiapan 2FA telah kedaluwarsa. Silakan mulai ulang penyiapan."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not verify_totp(secret, code):
+            return Response(
+                {"detail": "Kode 2FA tidak sesuai. Pastikan jam perangkat Anda akurat."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        request.user.totp_secret = secret
+        request.user.totp_enabled = True
+        request.user.save(update_fields=["totp_secret", "totp_enabled"])
+        cache.delete(f"pending_totp:{request.user.pk}")
+        log_action(
+            user=request.user,
+            action="auth.2fa_enabled",
+            request=request,
+            metadata={"user_id": request.user.pk},
+        )
+
+        return Response(
+            {
+                "status": "ok",
+                "message": "Autentikasi dua langkah (2FA) berhasil diaktifkan.",
+                "totp_enabled": True,
+            }
+        )
+
+
+class TwoFactorDisableView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        password = request.data.get("password")
+        code = request.data.get("code", "").strip()
+
+        is_valid = False
+        if password and request.user.check_password(password):
+            is_valid = True
+        elif code and verify_totp(request.user.totp_secret, code):
+            is_valid = True
+
+        if not is_valid:
+            return Response(
+                {"detail": "Password atau kode 2FA saat ini salah."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        request.user.totp_secret = ""
+        request.user.totp_enabled = False
+        request.user.save(update_fields=["totp_secret", "totp_enabled"])
+        log_action(
+            user=request.user,
+            action="auth.2fa_disabled",
+            request=request,
+            metadata={"user_id": request.user.pk},
+        )
+
+        return Response(
+            {
+                "status": "ok",
+                "message": "Autentikasi dua langkah (2FA) telah dinonaktifkan.",
+                "totp_enabled": False,
+            }
         )
 
 

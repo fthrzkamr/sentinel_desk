@@ -31,8 +31,18 @@ export const useAuthStore = defineStore('auth', {
       localStorage.setItem('sd_access_token', access)
     },
 
-    async login(username, password) {
-      const { data } = await api.post('/auth/login/', { username, password })
+    async login(username, password, otp_code = '') {
+      const { data } = await api.post('/auth/login/', { username, password, otp_code })
+      if (data.requires_2fa) {
+        return { requires_2fa: true, pre_auth_token: data.pre_auth_token }
+      }
+      this.setTokens({ access: data.access, refresh: data.refresh })
+      this.user = data.user
+      return data.user
+    },
+
+    async login2FA(pre_auth_token, otp_code) {
+      const { data } = await api.post('/auth/login/2fa/', { pre_auth_token, otp_code })
       this.setTokens({ access: data.access, refresh: data.refresh })
       this.user = data.user
       return data.user

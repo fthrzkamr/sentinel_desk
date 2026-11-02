@@ -11,6 +11,7 @@ from apps.alerts.services import resolve_connectivity_alert, sync_metric_alerts
 from apps.audit.services import get_client_ip
 from apps.devices.authentication import DeviceTokenAuthentication, IsDevice
 from apps.devices.models import Device
+from apps.devices.policy import get_agent_remote_payload
 
 from .broadcast import broadcast_dashboard_event
 from .models import DeviceMetric
@@ -137,7 +138,7 @@ class AgentMetricsView(APIView):
                 {"id": alert.id, "device_id": device.device_id, "status": alert.status},
             )
 
-        return Response({"status": device.status, "server_time": timezone.now()}, status=status.HTTP_201_CREATED)
+        return Response(get_agent_remote_payload(device_status=device.status), status=status.HTTP_201_CREATED)
 
 
 class DeviceMetricLatestView(APIView):

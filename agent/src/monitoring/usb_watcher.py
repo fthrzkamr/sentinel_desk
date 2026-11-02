@@ -40,7 +40,10 @@ class UsbWatcher:
         self._known: dict[str, tuple[str, str]] = {}
 
     def poll(self) -> tuple[list[dict], list[str]]:
-        """Returns (connected_events, disconnected_drive_letters)."""
+        """Returns (connected_events, disconnected_drive_letters) compared to
+        the last acknowledged state. Call `acknowledge_connected` /
+        `acknowledge_disconnected` once each event is processed so transient
+        network failures don't silently drop a USB event."""
         current = _removable_drives()
         connected = [
             {"drive_letter": letter, "label": label, "serial": serial}
@@ -48,6 +51,10 @@ class UsbWatcher:
             if letter not in self._known
         ]
         disconnected = [letter for letter in self._known if letter not in current]
-
-        self._known = current
         return connected, disconnected
+
+    def acknowledge_connected(self, drive_letter: str, label: str, serial: str) -> None:
+        self._known[drive_letter] = (label, serial)
+
+    def acknowledge_disconnected(self, drive_letter: str) -> None:
+        self._known.pop(drive_letter, None)

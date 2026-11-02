@@ -49,6 +49,7 @@ class FileActivityWatcher:
     def __init__(self):
         self._snapshots: dict[str, dict[str, float]] = {}
         self._sources: dict[str, str] = {}
+        self._pending_events: list[dict] = []
         for folder in _local_folders():
             self._snapshots[folder] = _snapshot(folder)
             self._sources[folder] = Source.LOCAL
@@ -94,4 +95,8 @@ class FileActivityWatcher:
 
             self._snapshots[folder] = current
 
-        return events
+        self._pending_events.extend(events)
+        return list(self._pending_events)
+
+    def clear_pending(self) -> None:
+        self._pending_events.clear()

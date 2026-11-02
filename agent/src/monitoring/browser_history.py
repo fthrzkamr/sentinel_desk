@@ -102,11 +102,22 @@ class BrowserHistoryTracker:
         # First sync only looks back an hour — this agent reports ongoing
         # activity, not a one-time dump of someone's entire browsing history.
         self._last_synced_at = datetime.datetime.utcnow() - datetime.timedelta(hours=1)
+        self._pending_synced_at: datetime.datetime | None = None
 
     def collect_new_entries(self) -> list[dict]:
+        now = datetime.datetime.utcnow()
         entries: list[dict] = []
         for browser, user_data_dir in BROWSER_USER_DATA_DIRS.items():
             for history_path in _profile_history_paths(user_data_dir):
                 entries.extend(_read_new_entries(browser, history_path, self._last_synced_at))
-        self._last_synced_at = datetime.datetime.utcnow()
+        if entries:
+            self._pending_synced_at = now
+        else:
+            self._last_synced_at = now
+            self._pending_synced_at = None
         return entries
+
+    def mark_synced(self) -> None:
+        if self._pending_synced_at is not None:
+            self._last_synced_at = self._pending_synced_at
+            self._pending_synced_at = None

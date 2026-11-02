@@ -4,11 +4,13 @@ import { onMounted, ref, watch } from 'vue'
 import Pagination from '@/components/Pagination.vue'
 import api from '@/services/api'
 import { listAuditLogs } from '@/services/audit'
+import { downloadCsv } from '@/utils/csv'
 
 const PAGE_SIZE = 25
 
 const rows = ref([])
 const isLoading = ref(true)
+const isExporting = ref(false)
 const errorMessage = ref('')
 const search = ref('')
 const actionFilter = ref('')
@@ -95,16 +97,50 @@ function formatMetadata(metadata) {
     .map(([key, value]) => `${key}=${value}`)
     .join(', ')
 }
+
+async function exportCsv() {
+  isExporting.value = true
+  try {
+    const { data } = await listAuditLogs({
+      search: search.value || undefined,
+      action: actionFilter.value || undefined,
+      username: usernameFilter.value || undefined,
+      device_id: deviceFilter.value || undefined,
+      created_after: dateFrom.value || undefined,
+      created_before: dateTo.value ? `${dateTo.value}T23:59:59` : undefined,
+      page_size: 500,
+    })
+    downloadCsv('audit-logs.csv', data.results || [], [
+      { header: 'Waktu', value: (r) => r.created_at },
+      { header: 'User', value: (r) => r.username || 'System' },
+      { header: 'Action', value: (r) => r.action },
+      { header: 'Device ID', value: (r) => r.device_id || '' },
+      { header: 'IP Address', value: (r) => r.ip_address || '' },
+      { header: 'Detail', value: (r) => formatMetadata(r.metadata) },
+    ])
+  } finally {
+    isExporting.value = false
+  }
+}
 </script>
 
 <template>
   <div class="space-y-4">
-    <div>
-      <h1 class="text-xl font-semibold text-slate-800">Audit Logs</h1>
-      <p class="mt-1 text-xs text-slate-400">
-        Catatan aktivitas administratif yang sensitif (login, live screen, disable device, manajemen user, dll).
-        Read-only — tidak bisa diedit atau dihapus dari mana pun, termasuk di sini.
-      </p>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 class="text-xl font-semibold text-slate-800">Audit Logs</h1>
+        <p class="mt-1 text-xs text-slate-400">
+          Catatan aktivitas administratif yang sensitif (login, live screen, disable device, manajemen user, dll).
+          Read-only — tidak bisa diedit atau dihapus dari mana pun, termasuk di sini.
+        </p>
+      </div>
+      <button
+        :disabled="isExporting || rows.length === 0"
+        class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        @click="exportCsv"
+      >
+        {{ isExporting ? 'Mengekspor...' : 'Export CSV' }}
+      </button>
     </div>
 
     <div class="flex flex-wrap items-end gap-3 rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-900/5">

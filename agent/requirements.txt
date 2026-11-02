@@ -8,3 +8,4 @@ mss==10.2.0
 websockets==17.1
 numpy==2.4.6
 Pillow==12.3.0
+pytest>=8.0.0

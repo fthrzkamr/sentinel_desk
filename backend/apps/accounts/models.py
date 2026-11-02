@@ -35,6 +35,8 @@ class User(AbstractUser):
     role = models.ForeignKey(
         Role, null=True, blank=True, on_delete=models.SET_NULL, related_name="users"
     )
+    totp_secret = models.CharField(max_length=64, blank=True)
+    totp_enabled = models.BooleanField(default=False)
 
     def has_permission_code(self, code: str) -> bool:
         if self.is_superuser:

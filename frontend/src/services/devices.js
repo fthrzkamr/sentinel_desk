@@ -4,6 +4,10 @@ export function listDevices(params = {}) {
   return api.get('/devices/', { params })
 }
 
+export function getDashboardSummary() {
+  return api.get('/devices/dashboard-summary/')
+}
+
 export function getDevice(deviceId) {
   return api.get(`/devices/${deviceId}/`)
 }
@@ -22,6 +26,10 @@ export function enableDevice(deviceId) {
 
 export function approveDevice(deviceId) {
   return api.post(`/devices/${deviceId}/approve/`)
+}
+
+export function rotateDeviceToken(deviceId) {
+  return api.post(`/devices/${deviceId}/rotate-token/`)
 }
 
 export function getDeviceAssetSuggestions(deviceId) {

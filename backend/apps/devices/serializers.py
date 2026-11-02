@@ -321,7 +321,7 @@ class EnrollmentTokenCreateSerializer(serializers.Serializer):
 
 
 class EnrollRequestSerializer(serializers.Serializer):
-    token = serializers.CharField()
+    token = serializers.CharField(required=False, allow_blank=True, default="")
     hostname = serializers.CharField(max_length=150)
     computer_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
     username = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")

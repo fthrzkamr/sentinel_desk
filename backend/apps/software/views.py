@@ -10,6 +10,7 @@ from apps.accounts.permissions import HasPermission
 from apps.alerts.services import trigger_new_software_alert
 from apps.devices.authentication import DeviceTokenAuthentication, IsDevice
 from apps.devices.models import Device
+from apps.monitoring.broadcast import broadcast_alert_triggered
 
 from .models import Software, SoftwareWhitelistEntry
 from .serializers import SoftwareSerializer, SoftwareSyncSerializer, SoftwareWhitelistEntrySerializer
@@ -55,9 +56,11 @@ class AgentSoftwareSyncView(APIView):
             if whitelist:
                 unauthorized_names = sorted(name for name in new_names if name not in whitelist)
                 if unauthorized_names:
-                    trigger_new_software_alert(device, names=unauthorized_names, unauthorized=True)
+                    broadcast_alert_triggered(
+                        trigger_new_software_alert(device, names=unauthorized_names, unauthorized=True)
+                    )
             else:
-                trigger_new_software_alert(device, names=new_names)
+                broadcast_alert_triggered(trigger_new_software_alert(device, names=new_names))
 
         return Response({"synced": len(items)}, status=status.HTTP_201_CREATED)
 

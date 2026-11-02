@@ -120,10 +120,21 @@ class SystemErrorTracker:
         # BrowserHistoryTracker — report ongoing activity, not a dump of
         # this machine's entire error history the moment monitoring turns on.
         self._last_synced_at = datetime.datetime.now() - datetime.timedelta(hours=1)
+        self._pending_synced_at: datetime.datetime | None = None
 
     def collect_new_entries(self) -> list[dict]:
+        now = datetime.datetime.now()
         entries: list[dict] = []
         for log_name in LOG_NAMES:
             entries.extend(_read_new_entries(log_name, self._last_synced_at))
-        self._last_synced_at = datetime.datetime.now()
+        if entries:
+            self._pending_synced_at = now
+        else:
+            self._last_synced_at = now
+            self._pending_synced_at = None
         return entries
+
+    def mark_synced(self) -> None:
+        if self._pending_synced_at is not None:
+            self._last_synced_at = self._pending_synced_at
+            self._pending_synced_at = None

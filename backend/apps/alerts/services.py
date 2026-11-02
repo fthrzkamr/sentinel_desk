@@ -3,6 +3,7 @@ from django.utils import timezone
 from apps.system_settings.models import SystemSettings
 
 from .models import Alert
+from .tasks import enqueue_critical_alert_notification
 
 _OPEN_STATUSES = [Alert.Status.OPEN, Alert.Status.ACKNOWLEDGED]
 
@@ -24,15 +25,22 @@ def _trigger(device, category, severity, message, metadata):
     the next heartbeat while nothing has actually changed."""
     existing = _open_alert(device, category)
     if existing:
+        escalated_to_critical = (
+            existing.severity != Alert.Severity.CRITICAL and severity == Alert.Severity.CRITICAL
+        )
         if existing.severity != severity or existing.message != message:
             existing.severity = severity
             existing.message = message
             existing.metadata = metadata
             existing.save(update_fields=["severity", "message", "metadata"])
+        if escalated_to_critical:
+            enqueue_critical_alert_notification(existing)
         return existing, False
     alert = Alert.objects.create(
         device=device, category=category, severity=severity, message=message, metadata=metadata
     )
+    if severity == Alert.Severity.CRITICAL:
+        enqueue_critical_alert_notification(alert)
     return alert, True
 
 

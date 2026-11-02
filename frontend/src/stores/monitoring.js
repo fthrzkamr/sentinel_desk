@@ -18,6 +18,7 @@ export const useMonitoringStore = defineStore('monitoring', {
     liveDevices: {}, // device_id -> { status, cpu_percent, ram_percent, disk_percent, battery_percent, battery_charging, last_seen }
     openAlertsCount: 0,
     criticalAlertsCount: 0,
+    lastAlertEventAt: 0,
   }),
 
   actions: {
@@ -62,6 +63,7 @@ export const useMonitoringStore = defineStore('monitoring', {
             ...payload,
           }
         } else if (message.type === 'alert.triggered' || message.type === 'alert.updated') {
+          this.lastAlertEventAt = Date.now()
           this.fetchAlertSummary()
         }
       }

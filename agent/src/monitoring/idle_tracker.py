@@ -58,9 +58,9 @@ class IdleActivityTracker:
 
         self._last_sample_at = now
 
-    def flush(self) -> list[dict]:
+    def pending(self) -> list[dict]:
         dates = set(self._active_seconds) | set(self._idle_seconds)
-        items = [
+        return [
             {
                 "date": date.isoformat(),
                 "active_seconds": self._active_seconds.get(date, 0),
@@ -68,6 +68,12 @@ class IdleActivityTracker:
             }
             for date in dates
         ]
+
+    def clear(self) -> None:
         self._active_seconds.clear()
         self._idle_seconds.clear()
+
+    def flush(self) -> list[dict]:
+        items = self.pending()
+        self.clear()
         return items

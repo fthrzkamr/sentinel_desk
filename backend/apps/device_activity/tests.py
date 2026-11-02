@@ -351,14 +351,14 @@ def test_visiting_file_sharing_site_alone_does_not_trigger_data_exfil_alert(enro
 
 
 @pytest.mark.django_db
-def test_file_sharing_visit_with_recent_local_file_activity_escalates_to_critical(enrolled_device):
+def test_file_sharing_visit_below_min_local_files_threshold_does_not_trigger_alert(enrolled_device):
     device_id, device_token = enrolled_device
 
     file_payload = {
         "items": [
             {
                 "event_type": "CREATED",
-                "path": r"C:\Users\budi\Documents\client_list.xlsx",
+                "path": r"C:\Users\budi\Documents\single_doc.xlsx",
                 "occurred_at": _local(10).isoformat(),
             }
         ]
@@ -373,9 +373,40 @@ def test_file_sharing_visit_with_recent_local_file_activity_escalates_to_critica
     resp = _agent_post(device_id, device_token, "/api/agent/browsing-history/", browse_payload)
     assert resp.status_code == 201
 
+    assert not Alert.objects.filter(device__device_id=device_id, category=Alert.Category.DATA_EXFIL).exists()
+
+
+@pytest.mark.django_db
+def test_file_sharing_visit_with_recent_local_file_activity_escalates_to_critical(enrolled_device):
+    device_id, device_token = enrolled_device
+
+    file_payload = {
+        "items": [
+            {
+                "event_type": "CREATED",
+                "path": r"C:\Users\budi\Documents\client_list.xlsx",
+                "occurred_at": _local(10).isoformat(),
+            },
+            {
+                "event_type": "MODIFIED",
+                "path": r"C:\Users\budi\Documents\pricing_2026.xlsx",
+                "occurred_at": _local(10).isoformat(),
+            },
+        ]
+    }
+    assert _agent_post(device_id, device_token, "/api/agent/file-activity/", file_payload).status_code == 201
+
+    naive = datetime.datetime(2026, 1, 15, 10, 5)
+    visited_at = timezone.make_aware(naive, timezone.get_current_timezone())
+    browse_payload = {
+        "items": [{"browser": "Edge", "url": "https://wetransfer.com/", "title": "WeTransfer", "visited_at": visited_at.isoformat()}]
+    }
+    resp = _agent_post(device_id, device_token, "/api/agent/browsing-history/", browse_payload)
+    assert resp.status_code == 201
+
     alert = Alert.objects.get(device__device_id=device_id, category=Alert.Category.DATA_EXFIL)
     assert alert.severity == Alert.Severity.CRITICAL
-    assert alert.metadata["recent_local_file_count"] == 1
+    assert alert.metadata["recent_local_file_count"] == 2
 
 
 @pytest.mark.django_db
@@ -415,3 +446,36 @@ def test_cloud_upload_alert_shares_category_with_usb_exfil_alert(enrolled_device
     assert _agent_post(device_id, device_token, "/api/agent/browsing-history/", browse_payload).status_code == 201
 
     assert Alert.objects.filter(device__device_id=device_id, category=Alert.Category.DATA_EXFIL).count() == 1
+
+
+@pytest.mark.django_db
+def test_usb_and_activity_alerts_broadcast_to_dashboard_ws(enrolled_device, monkeypatch):
+    device_id, device_token = enrolled_device
+    events = []
+
+    def fake_broadcast(event_type, payload):
+        events.append((event_type, payload))
+
+    monkeypatch.setattr("apps.monitoring.broadcast.broadcast_dashboard_event", fake_broadcast)
+
+    connect_resp = _agent_post(
+        device_id,
+        device_token,
+        "/api/agent/usb-event/",
+        {"event": "connected", "label": "SanDisk", "drive_letter": "F:", "serial": "SN999"},
+    )
+    assert connect_resp.status_code == 201
+    assert len(events) == 1
+    assert events[0][0] == "alert.triggered"
+    assert events[0][1]["category"] == Alert.Category.USB
+
+    disconnect_resp = _agent_post(
+        device_id,
+        device_token,
+        "/api/agent/usb-event/",
+        {"event": "disconnected", "drive_letter": "F:"},
+    )
+    assert disconnect_resp.status_code == 201
+    assert len(events) == 2
+    assert events[1][0] == "alert.updated"
+    assert events[1][1]["status"] == Alert.Status.RESOLVED

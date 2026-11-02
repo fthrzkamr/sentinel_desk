@@ -14,3 +14,19 @@
 Prinsip: setiap phase harus stabil & teruji sebelum lanjut ke phase berikutnya.
 Lihat percakapan awal proyek untuk arsitektur final, ERD, dan alur komunikasi
 lengkap (enrollment, realtime monitoring, live screen).
+
+---
+
+## Pengembangan Lanjutan (Post-Phase 8)
+
+Rincian lengkap saran pengembangan berikutnya beserta status pengerjaan per-item dapat dilihat di [`docs/pengembangan-lanjutan.md`](./pengembangan-lanjutan.md):
+
+| Tahap | Fokus Pengembangan | Status |
+|---|---|---|
+| **Tahap 1** | **Quick Wins & Stabilitas Inti** (Cache `SystemSettings`, Celery di `docker-compose.prod.yml`, Broadcast WebSocket semua kategori Alert, Ketahanan Sync Agent) | ✅ Selesai |
+| **Tahap 2** | **Notifikasi Eksternal & Eskalasi Insiden** (Telegram / Webhook / Email via Celery) | ✅ Selesai |
+| **Tahap 3** | **Export Laporan (CSV) & Optimasi Ringkasan Dashboard** | ✅ Selesai |
+| **Tahap 4** | **Manajemen Agent Jarak Jauh** (HTTP Session Pooling, Remote Config Policy, OTA Auto-Update) | ✅ Selesai |
+| **Tahap 5** | **Peningkatan Live Screen WebRTC** (TURN Server & Multi-Monitor Selector) | ✅ Selesai |
+| **Tahap 6** | **Keamanan Lanjutan & CI/CD Agent** (2FA/TOTP Admin, Retensi Alert, CI Test Agent) | ✅ Selesai |
+| **Tahap 7** | **Remote Control & Remote Assistance** (WebRTC DataChannel, Windows SendInput, Toolbar Pintasan & Clipboard) | ✅ Selesai |

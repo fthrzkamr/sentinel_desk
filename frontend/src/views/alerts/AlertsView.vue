@@ -4,12 +4,16 @@ import { onMounted, ref, watch } from 'vue'
 import Pagination from '@/components/Pagination.vue'
 import api from '@/services/api'
 import { listAlerts } from '@/services/alerts'
+import { useMonitoringStore } from '@/stores/monitoring'
+import { downloadCsv } from '@/utils/csv'
 import { timeAgo } from '@/utils/time'
 
 const PAGE_SIZE = 25
+const monitoring = useMonitoringStore()
 
 const rows = ref([])
 const isLoading = ref(true)
+const isExporting = ref(false)
 const errorMessage = ref('')
 const statusFilter = ref('')
 const severityFilter = ref('')
@@ -79,10 +83,40 @@ function goPrevious() {
   fetchAlerts(previousUrl.value)
 }
 
+async function exportCsv() {
+  isExporting.value = true
+  try {
+    const { data } = await listAlerts({
+      status: statusFilter.value || undefined,
+      severity: severityFilter.value || undefined,
+      category: categoryFilter.value || undefined,
+      page_size: 500,
+    })
+    downloadCsv('alerts.csv', data.results || [], [
+      { header: 'Waktu Trigger', value: (r) => r.triggered_at },
+      { header: 'Device ID', value: (r) => r.device_id },
+      { header: 'Karyawan', value: (r) => r.assigned_employee || '' },
+      { header: 'Kategori', value: (r) => r.category },
+      { header: 'Severity', value: (r) => r.severity },
+      { header: 'Status', value: (r) => r.status },
+      { header: 'Pesan', value: (r) => r.message },
+      { header: 'Waktu Selesai', value: (r) => r.resolved_at || '' },
+    ])
+  } finally {
+    isExporting.value = false
+  }
+}
+
 watch([statusFilter, severityFilter, categoryFilter], () => {
   currentPage.value = 1
   fetchAlerts()
 })
+watch(
+  () => monitoring.lastAlertEventAt,
+  () => {
+    if (currentPage.value === 1) fetchAlerts()
+  },
+)
 onMounted(fetchAlerts)
 </script>
 
@@ -112,6 +146,13 @@ onMounted(fetchAlerts)
           <option value="">Semua Kategori</option>
           <option v-for="c in CATEGORY_OPTIONS" :key="c" :value="c">{{ c }}</option>
         </select>
+        <button
+          :disabled="isExporting || rows.length === 0"
+          class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          @click="exportCsv"
+        >
+          {{ isExporting ? 'Mengekspor...' : 'Export CSV' }}
+        </button>
       </div>
     </div>
 

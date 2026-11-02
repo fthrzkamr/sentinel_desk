@@ -10,6 +10,7 @@ import threading
 
 import websockets
 
+from screen.capture_track import get_available_monitors
 from screen.webrtc_session import WebRTCSession
 
 logger = logging.getLogger("sentineldesk.agent")
@@ -24,6 +25,8 @@ class LiveScreenAgent:
         self.url = f"{ws_base}/ws/agent/{device_id}/signal/?token={device_token}"
         self.session: WebRTCSession | None = None
         self._stop_event = threading.Event()
+        self._active_monitor_index = 1
+        self._ice_servers = None
 
     def start_in_background(self) -> threading.Thread:
         thread = threading.Thread(target=self._run_forever, daemon=True, name="livescreen-signaling")
@@ -79,13 +82,42 @@ class LiveScreenAgent:
 
         if msg_type == "viewer_joined":
             logger.info("Admin requested to view this screen — waiting for connection offer")
+            if "ice_servers" in message:
+                self._ice_servers = message.get("ice_servers")
+            try:
+                monitors = get_available_monitors()
+                await ws.send(
+                    json.dumps({
+                        "type": "monitors_list",
+                        "monitors": monitors,
+                        "active_monitor": self._active_monitor_index,
+                    })
+                )
+            except Exception as exc:
+                logger.warning("Could not query available monitors: %s", exc)
 
         elif msg_type == "webrtc_offer":
             await self._end_session()
-            self.session = WebRTCSession()
+            ice_servers = message.get("ice_servers") or self._ice_servers
+            self.session = WebRTCSession(
+                ice_servers=ice_servers,
+                monitor_index=self._active_monitor_index,
+            )
             answer_sdp = await self.session.handle_offer(message["sdp"])
             await ws.send(json.dumps({"type": "webrtc_answer", "sdp": answer_sdp}))
-            logger.info("Live screen streaming started")
+            logger.info("Live screen streaming started (monitor=%s)", self._active_monitor_index)
+
+        elif msg_type == "switch_monitor":
+            new_idx = int(message.get("monitor_index", 1))
+            self._active_monitor_index = new_idx
+            if self.session:
+                self.session.set_monitor(new_idx)
+            logger.info("Live screen switched capture to monitor %s", new_idx)
+            await ws.send(json.dumps({"type": "monitor_switched", "active_monitor": new_idx}))
+
+        elif msg_type == "remote_input":
+            if self.session:
+                self.session.handle_control_message(message.get("event", {}))
 
         elif msg_type in ("stop_live_screen", "agent_disconnected"):
             await self._end_session()

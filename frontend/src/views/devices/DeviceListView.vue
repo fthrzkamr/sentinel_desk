@@ -58,6 +58,7 @@ const offsetStack = [0]
 const currentPage = computed(() => Math.floor(pageOffset.value / PAGE_SIZE) + 1)
 
 const confirmState = reactive({ open: false, device: null, action: null })
+const pendingDevicesCount = computed(() => devices.value.filter((d) => !d.is_approved).length)
 
 const statusOptions = ['', 'ONLINE', 'OFFLINE', 'WARNING', 'CRITICAL', 'DISABLED']
 
@@ -224,6 +225,26 @@ async function confirmReassign() {
 
 <template>
   <div class="space-y-4">
+    <!-- Banner Perangkat Menunggu Approval -->
+    <div
+      v-if="pendingDevicesCount > 0"
+      class="flex items-center justify-between rounded-xl bg-amber-50 p-4 border border-amber-200"
+    >
+      <div class="flex items-center gap-3">
+        <div class="flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+          <NavIcon name="bell" class="h-5 w-5" />
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold text-amber-900">
+            {{ pendingDevicesCount }} Perangkat Baru Menunggu Persetujuan
+          </h4>
+          <p class="text-xs text-amber-700">
+            Laptop baru yang baru saja menginstall agent terdaftar otomatis. Klik tombol check di kolom aksi untuk menyetujui (Approve).
+          </p>
+        </div>
+      </div>
+    </div>
+
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h1 class="text-xl font-semibold text-slate-800">Devices</h1>
       <div class="flex flex-wrap gap-2">

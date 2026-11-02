@@ -1,5 +1,7 @@
 from django.conf import settings
-from django.db.models import Q
+from django.contrib.auth.hashers import make_password
+from django.db.models import Count, F, Q
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
@@ -10,6 +12,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import HasPermission
+from apps.alerts.services import RISK_CATEGORY_WEIGHTS, RISK_WINDOW_DAYS, compute_risk_score
 from apps.audit.services import get_client_ip, log_action
 
 from .asset_matching import find_asset_candidates_by_spec, find_employee_by_name, rematch_unlinked_assets, sync_asset
@@ -24,6 +27,7 @@ from .models import (
     Employee,
     EnrollmentToken,
 )
+from .policy import get_agent_remote_payload
 from .serializers import (
     AssetLinkSerializer,
     AssetSerializer,
@@ -113,25 +117,27 @@ class AgentEnrollView(APIView):
         serializer = EnrollRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        raw_token = data.pop("token")
+        raw_token = (data.pop("token", "") or "").strip()
+        matched_token = None
 
-        candidates = EnrollmentToken.objects.filter(
-            Q(used_at__isnull=True) | Q(is_reusable=True),
-            revoked=False,
-            expires_at__gt=timezone.now(),
-        )
-        matched_token = next((t for t in candidates if t.check_token(raw_token)), None)
+        if raw_token:
+            candidates = EnrollmentToken.objects.filter(
+                Q(used_at__isnull=True) | Q(is_reusable=True),
+                revoked=False,
+                expires_at__gt=timezone.now(),
+            )
+            matched_token = next((t for t in candidates if t.check_token(raw_token)), None)
 
-        if matched_token is None:
-            log_action(
-                action="agent.enroll_failed",
-                request=request,
-                metadata={"hostname": data.get("hostname", "")},
-            )
-            return Response(
-                {"detail": "Invalid, expired, or already-used enrollment token."},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
+            if matched_token is None:
+                log_action(
+                    action="agent.enroll_failed",
+                    request=request,
+                    metadata={"hostname": data.get("hostname", ""), "reason": "invalid_token"},
+                )
+                return Response(
+                    {"detail": "Invalid, expired, or already-used enrollment token."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
 
         mac_address = data.get("mac_address") or ""
         existing_device = (
@@ -148,59 +154,54 @@ class AgentEnrollView(APIView):
                 "previous_hostname": device.hostname,
                 "previous_assigned_employee": str(device.assigned_employee) if device.assigned_employee else None,
                 "new_hostname": data.get("hostname", ""),
-                "new_assigned_employee": str(matched_token.assigned_employee) if matched_token.assigned_employee else None,
+                "new_assigned_employee": str(matched_token.assigned_employee) if (matched_token and matched_token.assigned_employee) else None,
             }
             for field, value in data.items():
                 setattr(device, field, value)
             device.ip_address = get_client_ip(request)
-            # Only overwrite org assignment from the token when the token
-            # actually specifies it - a generic reusable deployment token
-            # (no company/branch/department/employee of its own, by
-            # design, see EnrollmentToken.create_with_token) must never
-            # blank out org info an admin already set on this device from
-            # a previous enrollment just because this re-enroll happened
-            # to use that generic token instead of a per-employee one.
-            if matched_token.company_id:
-                device.company = matched_token.company
-            if matched_token.branch_id:
-                device.branch = matched_token.branch
-            if matched_token.department_id:
-                device.department = matched_token.department
-            if matched_token.assigned_employee_id:
-                device.assigned_employee = matched_token.assigned_employee
+            if matched_token:
+                if matched_token.company_id:
+                    device.company = matched_token.company
+                if matched_token.branch_id:
+                    device.branch = matched_token.branch
+                if matched_token.department_id:
+                    device.department = matched_token.department
+                if matched_token.assigned_employee_id:
+                    device.assigned_employee = matched_token.assigned_employee
+
             device.status = Device.Status.OFFLINE
             device.last_seen = None
             device.save()
             DeviceCredential.objects.filter(device=device).delete()
             action = "device.reenrolled"
-            metadata = {"enrollment_token_id": matched_token.id, **reenroll_metadata}
+            metadata = {"enrollment_token_id": matched_token.id if matched_token else None, **reenroll_metadata}
         else:
+            # Auto-enrolled without token starts unapproved (Pending Approval)
+            is_approved = bool(matched_token and not matched_token.is_reusable)
             device = Device.objects.create(
                 ip_address=get_client_ip(request),
-                company=matched_token.company,
-                branch=matched_token.branch,
-                department=matched_token.department,
-                assigned_employee=matched_token.assigned_employee,
-                # A single-use token means an admin generated it for this
-                # specific laptop, so it's trusted immediately like always.
-                # A reusable token (mass-deployment key, e.g. baked into the
-                # MSI installer) can't make that same guarantee about who's
-                # actually running the installer, so it starts pending an
-                # explicit admin approval instead — see
-                # DeviceTokenAuthentication.authenticate() for where that's
-                # enforced.
-                is_approved=not matched_token.is_reusable,
+                company=matched_token.company if matched_token else None,
+                branch=matched_token.branch if matched_token else None,
+                department=matched_token.department if matched_token else None,
+                assigned_employee=matched_token.assigned_employee if matched_token else None,
+                is_approved=is_approved,
                 **data,
             )
             action = "device.registered"
-            metadata = {"enrollment_token_id": matched_token.id, "hostname": device.hostname}
+            metadata = {
+                "enrollment_token_id": matched_token.id if matched_token else None,
+                "hostname": device.hostname,
+                "auto_enrolled": matched_token is None,
+            }
 
-        matched_token.mark_used(device)
+        if matched_token:
+            matched_token.mark_used(device)
+
         credential, raw_device_token = DeviceCredential.create_for_device(device)
         rematch_unlinked_assets(device)
 
         log_action(
-            user=matched_token.created_by,
+            user=matched_token.created_by if matched_token else None,
             action=action,
             device_id=device.device_id,
             request=request,
@@ -208,7 +209,11 @@ class AgentEnrollView(APIView):
         )
 
         return Response(
-            {"device_id": device.device_id, "device_token": raw_device_token},
+            {
+                "device_id": device.device_id,
+                "device_token": raw_device_token,
+                "is_approved": device.is_approved,
+            },
             status=status.HTTP_201_CREATED,
         )
 
@@ -238,7 +243,32 @@ class AgentHeartbeatView(APIView):
             device.status = Device.Status.ONLINE
         device.save(update_fields=update_fields)
 
-        return Response({"status": device.status, "server_time": timezone.now()})
+        return Response(get_agent_remote_payload(device_status=device.status))
+
+
+class AgentDownloadView(APIView):
+    """Serves the latest or specified agent release .exe to authenticated devices
+    or administrators. Kept out of standard public MEDIA_URL."""
+
+    authentication_classes = [DeviceTokenAuthentication]
+    permission_classes = [IsDevice]
+
+    def get(self, request, version=None):
+        import os
+        from apps.system_settings.models import SystemSettings
+
+        if not version or version == "latest":
+            version = SystemSettings.get_solo().agent_latest_version
+
+        if not version:
+            raise Http404("No agent release version specified or configured.")
+
+        filename = f"SentinelDeskAgent-{version}.exe"
+        file_path = settings.MEDIA_ROOT / "agent" / filename
+        if not os.path.exists(file_path):
+            raise Http404(f"Release binary {filename} not found.")
+
+        return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
 
 
 class DeviceListView(generics.ListAPIView):
@@ -250,6 +280,87 @@ class DeviceListView(generics.ListAPIView):
     queryset = Device.objects.select_related(
         "company", "branch", "department", "assigned_employee"
     ).prefetch_related("assets").all()
+
+
+class DashboardSummaryView(APIView):
+    """Fleet-wide aggregated counts, security compliance posture, and top
+    insider-threat risk devices for the main Dashboard page. Computed at the
+    DB level so counts stay exact even when the fleet exceeds a single
+    paginated DeviceListView response."""
+
+    permission_classes = [IsAuthenticated, HasPermission("device.view")]
+
+    def get(self, request):
+        status_rows = Device.objects.values("status").annotate(count=Count("id"))
+        status_counts = {
+            "total": 0,
+            Device.Status.ONLINE: 0,
+            Device.Status.OFFLINE: 0,
+            Device.Status.WARNING: 0,
+            Device.Status.CRITICAL: 0,
+            Device.Status.DISABLED: 0,
+            "pending_approval": Device.objects.filter(is_approved=False).count(),
+        }
+        for row in status_rows:
+            s = row["status"]
+            c = row["count"]
+            status_counts["total"] += c
+            if s in status_counts:
+                status_counts[s] = c
+
+        active_qs = Device.objects.exclude(status=Device.Status.DISABLED)
+        compliance = {
+            "active_total": active_qs.count(),
+            "bitlocker_off": active_qs.filter(bitlocker_enabled=False).count(),
+            "firewall_off": active_qs.filter(firewall_enabled=False).count(),
+            "antivirus_off": active_qs.filter(antivirus_enabled=False).count(),
+            "low_battery_health": active_qs.filter(
+                battery_design_capacity_mwh__gt=0,
+                battery_full_charge_capacity_mwh__isnull=False,
+                battery_full_charge_capacity_mwh__lt=F("battery_design_capacity_mwh") * 0.5,
+            ).count(),
+            "fully_compliant": active_qs.filter(
+                bitlocker_enabled=True,
+                firewall_enabled=True,
+                antivirus_enabled=True,
+            ).count(),
+        }
+
+        since = timezone.now() - timezone.timedelta(days=RISK_WINDOW_DAYS)
+        risk_candidates = (
+            Device.objects.filter(
+                alerts__category__in=list(RISK_CATEGORY_WEIGHTS.keys()),
+                alerts__triggered_at__gte=since,
+            )
+            .distinct()
+            .select_related("assigned_employee", "branch")
+            .prefetch_related("alerts")
+        )
+        scored_devices = []
+        for dev in risk_candidates:
+            risk = compute_risk_score(dev, window_days=RISK_WINDOW_DAYS)
+            if risk["score"] > 0:
+                scored_devices.append(
+                    {
+                        "device_id": dev.device_id,
+                        "hostname": dev.hostname,
+                        "assigned_employee": str(dev.assigned_employee) if dev.assigned_employee else None,
+                        "branch": dev.branch.name if dev.branch else None,
+                        "status": dev.status,
+                        "score": risk["score"],
+                        "level": risk["level"],
+                        "breakdown": risk["breakdown"],
+                    }
+                )
+        scored_devices.sort(key=lambda item: item["score"], reverse=True)
+
+        return Response(
+            {
+                "status_counts": status_counts,
+                "compliance": compliance,
+                "high_risk_devices": scored_devices[:5],
+            }
+        )
 
 
 class DeviceDetailView(generics.RetrieveUpdateAPIView):
@@ -664,3 +775,57 @@ class AssetSetUserView(APIView):
             metadata={"asset_code": asset.asset_code, "employee_id": employee.id if employee else None},
         )
         return Response(AssetSerializer(asset).data)
+
+
+class DeviceRotateTokenView(APIView):
+    permission_classes = [IsAuthenticated, HasPermission("agent.manage")]
+
+    def post(self, request, device_id):
+        device = get_object_or_404(Device, device_id=device_id)
+        new_raw_token = DeviceCredential.generate_token()
+        cred, _ = DeviceCredential.objects.get_or_create(device=device)
+        cred.token_hash = make_password(new_raw_token)
+        cred.save(update_fields=["token_hash"])
+
+        log_action(
+            user=request.user,
+            action="device.token_rotated",
+            request=request,
+            device_id=device.device_id,
+            metadata={"device_id": device.device_id},
+        )
+        return Response(
+            {
+                "device_id": device.device_id,
+                "device_token": new_raw_token,
+                "message": "Token perangkat berhasil dirotasi.",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class AgentRotateTokenView(APIView):
+    authentication_classes = [DeviceTokenAuthentication]
+    permission_classes = [IsDevice]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "agent"
+
+    def post(self, request):
+        device: Device = request.auth
+        new_raw_token = DeviceCredential.generate_token()
+        cred = device.credential
+        cred.token_hash = make_password(new_raw_token)
+        cred.save(update_fields=["token_hash"])
+
+        log_action(
+            action="agent.token_rotated",
+            device_id=device.device_id,
+            metadata={"device_id": device.device_id, "by": "agent"},
+        )
+        return Response(
+            {
+                "device_id": device.device_id,
+                "device_token": new_raw_token,
+            },
+            status=status.HTTP_200_OK,
+        )
