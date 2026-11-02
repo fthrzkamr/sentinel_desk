@@ -62,8 +62,8 @@ Copy-Item (Join-Path $agentDist "SentinelDeskWatchdog") (Join-Path $payload "Sen
 # real values as later lines in this same file after it's copied into
 # place (python-dotenv resolves a repeated key to its last occurrence).
 $envContent = @"
-SERVER_URL=http://localhost:8000
-ENROLLMENT_TOKEN=
+SERVER_URL=$($ServerUrl -or "http://DESKTOP-U4KO690:8000")
+ENROLLMENT_TOKEN=$EnrollmentToken
 MONITOR_INTERVAL=15
 INSTALLED_VIA_MSI=true
 SCREEN_MONITOR_ENABLED=true

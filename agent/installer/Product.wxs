@@ -19,7 +19,7 @@
   <Package
     Name="SentinelDesk Agent"
     Manufacturer="SentinelDesk"
-    Version="0.8.15.0"
+    Version="0.8.17.0"
     UpgradeCode="8f2b6b6e-6f2a-4a3e-9c3a-2f6a1b6c9d10"
     Compressed="yes"
     Scope="perMachine">
