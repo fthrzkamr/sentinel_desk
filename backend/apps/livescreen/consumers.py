@@ -55,6 +55,11 @@ class AgentSignalConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({"type": "pong"}))
             return
 
+        if message.get("type") == "permission_denied":
+            await alog(user=None, action="livescreen.permission_denied", device_id=self.device_id, metadata={"reason": message.get("message")})
+        elif message.get("type") == "permission_granted":
+            await alog(user=None, action="livescreen.permission_granted", device_id=self.device_id, metadata={})
+
         admin_channel = presence.get_admin_channel(self.device_id)
         if admin_channel:
             await self.channel_layer.send(admin_channel, {"type": "relay.message", "payload": message})

@@ -11,6 +11,7 @@ import threading
 import websockets
 
 from screen.capture_track import get_available_monitors
+from screen.consent_dialog import ask_remote_permission
 from screen.webrtc_session import WebRTCSession
 
 logger = logging.getLogger("sentineldesk.agent")
@@ -27,6 +28,7 @@ class LiveScreenAgent:
         self._stop_event = threading.Event()
         self._active_monitor_index = 1
         self._ice_servers = None
+        self._permission_granted = False
 
     def start_in_background(self) -> threading.Thread:
         thread = threading.Thread(target=self._run_forever, daemon=True, name="livescreen-signaling")
@@ -81,9 +83,36 @@ class LiveScreenAgent:
         msg_type = message.get("type")
 
         if msg_type == "viewer_joined":
-            logger.info("Admin requested to view this screen — waiting for connection offer")
+            logger.info("Admin requested remote session — prompting client user for consent")
             if "ice_servers" in message:
                 self._ice_servers = message.get("ice_servers")
+
+            # Notify admin that consent dialog is active on client laptop
+            await ws.send(
+                json.dumps({
+                    "type": "permission_pending",
+                    "message": "Menunggu persetujuan pengguna laptop klien...",
+                })
+            )
+
+            loop = asyncio.get_event_loop()
+            granted = await loop.run_in_executor(None, ask_remote_permission, 30)
+
+            if not granted:
+                logger.info("Remote session rejected by client user or timed out")
+                self._permission_granted = False
+                await ws.send(
+                    json.dumps({
+                        "type": "permission_denied",
+                        "message": "Permintaan remote ditolak oleh pengguna perangkat (atau waktu persetujuan habis).",
+                    })
+                )
+                return
+
+            logger.info("Remote session approved by client user")
+            self._permission_granted = True
+            await ws.send(json.dumps({"type": "permission_granted"}))
+
             try:
                 monitors = get_available_monitors()
                 await ws.send(
@@ -97,6 +126,15 @@ class LiveScreenAgent:
                 logger.warning("Could not query available monitors: %s", exc)
 
         elif msg_type == "webrtc_offer":
+            if not getattr(self, "_permission_granted", False):
+                logger.warning("webrtc_offer rejected: consent was not granted by client")
+                await ws.send(
+                    json.dumps({
+                        "type": "permission_denied",
+                        "message": "Permintaan remote belum atau tidak disetujui oleh pengguna.",
+                    })
+                )
+                return
             await self._end_session()
             ice_servers = message.get("ice_servers") or self._ice_servers
             self.session = WebRTCSession(
@@ -123,6 +161,7 @@ class LiveScreenAgent:
             await self._end_session()
 
     async def _end_session(self):
+        self._permission_granted = False
         if self.session:
             await self.session.close()
             self.session = None

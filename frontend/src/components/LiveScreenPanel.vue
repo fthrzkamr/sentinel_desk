@@ -21,6 +21,7 @@ const STATE = {
 
 const state = ref(STATE.IDLE)
 const errorMessage = ref('')
+const permissionStatus = ref('')
 const videoEl = ref(null)
 const screenContainerEl = ref(null)
 const fullscreenContainerEl = ref(null)
@@ -74,6 +75,7 @@ function cleanup() {
   monitors.value = []
   isControlActive.value = false
   showClipboardModal.value = false
+  permissionStatus.value = ''
 }
 
 async function toggleFullscreen() {
@@ -302,6 +304,7 @@ function handleKeyUp(e) {
 async function start() {
   state.value = STATE.CONNECTING
   errorMessage.value = ''
+  permissionStatus.value = 'Menghubungkan ke perangkat...'
   isControlActive.value = false
 
   socket = new WebSocket(`${WS_BASE_URL}/livescreen/${props.deviceId}/?token=${auth.accessToken}`)
@@ -367,7 +370,16 @@ async function start() {
       return
     }
 
-    if (message.type === 'ice_config' && Array.isArray(message.ice_servers)) {
+    if (message.type === 'permission_pending') {
+      state.value = STATE.CONNECTING
+      permissionStatus.value = message.message || 'Menunggu persetujuan pengguna laptop klien...'
+    } else if (message.type === 'permission_granted') {
+      permissionStatus.value = 'Izin disetujui, memulai sesi streaming...'
+    } else if (message.type === 'permission_denied') {
+      errorMessage.value = message.message || 'Permintaan remote ditolak oleh pengguna perangkat.'
+      state.value = STATE.ERROR
+      cleanup()
+    } else if (message.type === 'ice_config' && Array.isArray(message.ice_servers)) {
       configuredIceServers.value = message.ice_servers
     } else if (message.type === 'monitors_list' && Array.isArray(message.monitors)) {
       monitors.value = message.monitors
@@ -471,7 +483,7 @@ defineExpose({ STATE })
           {{
             {
               idle: 'Tidak aktif',
-              connecting: 'Menghubungkan...',
+              connecting: permissionStatus || 'Menghubungkan...',
               streaming: 'Streaming aktif',
               error: 'Error',
             }[state]
@@ -640,8 +652,17 @@ defineExpose({ STATE })
         style="image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;"
       />
 
-      <div v-if="state !== STATE.STREAMING" class="flex h-full items-center justify-center text-sm text-slate-400">
-        {{ state === STATE.CONNECTING ? 'Menunggu koneksi dari agent...' : 'Klik "Mulai Live Screen" untuk memulai.' }}
+      <div v-if="state === STATE.CONNECTING" class="flex flex-col items-center justify-center p-6 text-center space-y-3">
+        <div class="h-8 w-8 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />
+        <div class="text-sm font-semibold text-amber-300">
+          {{ permissionStatus || 'Menunggu persetujuan pengguna laptop klien...' }}
+        </div>
+        <div class="text-xs text-slate-400 max-w-sm">
+          Dialog konfirmasi sedang ditampilkan pada laptop klien. Pengguna dapat memilih <b>Setujui</b> untuk mengizinkan atau <b>Tolak</b>.
+        </div>
+      </div>
+      <div v-else-if="state !== STATE.STREAMING" class="flex h-full items-center justify-center text-sm text-slate-400">
+        Klik "Mulai Live Screen" untuk memulai.
       </div>
     </div>
 
