@@ -12,6 +12,24 @@ from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSession
 from screen.capture_track import ScreenShareTrack
 from screen.input_controller import InputController
 
+# Upgrade aiortc's internal encoder bitrates for crisp desktop streaming
+# (prevents blurry macroblocks / low-res artifacts on 1080p screen share)
+try:
+    import aiortc.codecs.h264 as h264_codec
+
+    h264_codec.DEFAULT_BITRATE = 3_500_000
+    h264_codec.MAX_BITRATE = 8_000_000
+except Exception:
+    pass
+
+try:
+    import aiortc.codecs.vpx as vpx_codec
+
+    vpx_codec.DEFAULT_BITRATE = 2_500_000
+    vpx_codec.MAX_BITRATE = 6_000_000
+except Exception:
+    pass
+
 logger = logging.getLogger("sentineldesk.agent")
 
 DEFAULT_ICE_SERVERS = [RTCIceServer(urls=["stun:stun.l.google.com:19302"])]
@@ -38,8 +56,8 @@ class WebRTCSession:
     def __init__(
         self,
         ice_servers: list | None = None,
-        fps: int = 12,
-        max_width: int = 1280,
+        fps: int = 15,
+        max_width: int = 1920,
         monitor_index: int = 1,
     ):
         servers = _build_ice_servers(ice_servers)

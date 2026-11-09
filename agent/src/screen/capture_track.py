@@ -14,8 +14,8 @@ from av import VideoFrame
 from PIL import Image
 
 VIDEO_CLOCK_RATE = 90000
-DEFAULT_FPS = 12
-DEFAULT_MAX_WIDTH = 1280
+DEFAULT_FPS = 15
+DEFAULT_MAX_WIDTH = 1920
 
 
 def get_available_monitors() -> list[dict]:
@@ -100,10 +100,20 @@ class ScreenShareTrack(VideoStreamTrack):
         height, width = img.shape[:2]
         if width > self.max_width:
             scale = self.max_width / width
-            new_size = (self.max_width, int(height * scale))
+            target_w = self.max_width
+            target_h = int(height * scale)
+            # Ensure dimensions are even for video codecs (libx264 / VP8)
+            target_w -= target_w % 2
+            target_h -= target_h % 2
             pil_img = Image.fromarray(img[:, :, ::-1])  # BGR -> RGB for PIL
-            pil_img = pil_img.resize(new_size, Image.BILINEAR)
+            pil_img = pil_img.resize((target_w, target_h), Image.BICUBIC)
             img = np.array(pil_img)[:, :, ::-1].copy()  # RGB -> BGR back
+        else:
+            # Ensure width and height are even numbers
+            h_even = height - (height % 2)
+            w_even = width - (width % 2)
+            if h_even != height or w_even != width:
+                img = img[:h_even, :w_even]
 
         return img
 

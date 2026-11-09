@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { useAuthStore } from '@/stores/auth'
 
@@ -23,6 +23,8 @@ const state = ref(STATE.IDLE)
 const errorMessage = ref('')
 const videoEl = ref(null)
 const screenContainerEl = ref(null)
+const fullscreenContainerEl = ref(null)
+const isFullscreen = ref(false)
 const configuredIceServers = ref([{ urls: 'stun:stun.l.google.com:19302' }])
 const monitors = ref([])
 const activeMonitor = ref(1)
@@ -39,6 +41,16 @@ let controlChannel = null
 let lastMoveTime = 0
 
 function cleanup() {
+  if (isFullscreen.value) {
+    try {
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        document.exitFullscreen()
+      }
+    } catch {
+      // ignore
+    }
+    isFullscreen.value = false
+  }
   if (controlChannel) {
     try {
       controlChannel.close()
@@ -62,6 +74,43 @@ function cleanup() {
   monitors.value = []
   isControlActive.value = false
   showClipboardModal.value = false
+}
+
+async function toggleFullscreen() {
+  const el = fullscreenContainerEl.value
+  if (!el) return
+
+  if (!isFullscreen.value) {
+    isFullscreen.value = true
+    try {
+      if (el.requestFullscreen) {
+        await el.requestFullscreen()
+      } else if (el.webkitRequestFullscreen) {
+        await el.webkitRequestFullscreen()
+      }
+    } catch {
+      // In-page maximize handled via isFullscreen = true
+    }
+  } else {
+    isFullscreen.value = false
+    try {
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen()
+        } else if (document.webkitExitFullscreen) {
+          await document.webkitExitFullscreen()
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function onFullscreenChange() {
+  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+    isFullscreen.value = false
+  }
 }
 
 function stop() {
@@ -229,6 +278,11 @@ function handleDoubleClick(e) {
 }
 
 function handleKeyDown(e) {
+  if (e.key === 'Escape' && isFullscreen.value && !isControlActive.value) {
+    toggleFullscreen()
+    return
+  }
+
   if (!isControlActive.value) return
 
   // Prevent browser shortcuts from stealing focus
@@ -268,8 +322,11 @@ async function start() {
     }
 
     pc.ontrack = (event) => {
-      if (videoEl.value) {
+      if (videoEl.value && event.streams[0]) {
         videoEl.value.srcObject = event.streams[0]
+      }
+      if (event.track && 'contentHint' in event.track) {
+        event.track.contentHint = 'detail'
       }
       state.value = STATE.STREAMING
     }
@@ -375,7 +432,14 @@ function waitIceGatheringComplete(connection) {
   })
 }
 
+onMounted(() => {
+  document.addEventListener('fullscreenchange', onFullscreenChange)
+  document.addEventListener('webkitfullscreenchange', onFullscreenChange)
+})
+
 onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
+  document.removeEventListener('webkitfullscreenchange', onFullscreenChange)
   cleanup()
 })
 
@@ -383,7 +447,14 @@ defineExpose({ STATE })
 </script>
 
 <template>
-  <div class="space-y-3">
+  <div
+    ref="fullscreenContainerEl"
+    :class="
+      isFullscreen
+        ? 'fixed inset-0 z-50 flex flex-col bg-slate-950 p-4 space-y-3 overflow-hidden'
+        : 'space-y-3'
+    "
+  >
     <!-- Header Controls -->
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex items-center gap-2 text-sm">
@@ -396,7 +467,7 @@ defineExpose({ STATE })
             'bg-red-500': state === STATE.ERROR,
           }"
         />
-        <span class="text-slate-500 font-medium">
+        <span :class="isFullscreen ? 'text-slate-200 font-medium' : 'text-slate-500 font-medium'">
           {{
             {
               idle: 'Tidak aktif',
@@ -411,7 +482,7 @@ defineExpose({ STATE })
       <div class="flex items-center gap-2">
         <!-- Monitor Selector -->
         <div v-if="state === STATE.STREAMING && monitors.length > 1" class="flex items-center gap-1.5">
-          <label class="text-xs font-medium text-slate-500">Layar:</label>
+          <label class="text-xs font-medium" :class="isFullscreen ? 'text-slate-300' : 'text-slate-500'">Layar:</label>
           <select
             v-model="activeMonitor"
             class="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
@@ -437,6 +508,16 @@ defineExpose({ STATE })
         >
           <span v-if="isControlActive">Kendali Aktif</span>
           <span v-else>Ambil Kendali (Remote)</span>
+        </button>
+
+        <!-- Toggle Fullscreen / Minimize -->
+        <button
+          v-if="state === STATE.STREAMING"
+          type="button"
+          class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 transition-all"
+          @click="toggleFullscreen"
+        >
+          {{ isFullscreen ? 'Perkecil (Minimize)' : 'Layar Penuh (Full)' }}
         </button>
 
         <!-- Start / Stop buttons -->
@@ -518,13 +599,14 @@ defineExpose({ STATE })
     <div
       ref="screenContainerEl"
       tabindex="0"
-      class="relative overflow-hidden rounded-lg bg-slate-900 outline-none transition-all"
-      :class="
+      class="relative overflow-hidden rounded-lg bg-slate-900 outline-none transition-all flex items-center justify-center"
+      :class="[
         isControlActive
           ? 'ring-2 ring-amber-500 cursor-crosshair'
-          : 'cursor-default'
-      "
-      style="aspect-ratio: 16 / 9"
+          : 'cursor-default',
+        isFullscreen ? 'flex-1 min-h-0 w-full' : ''
+      ]"
+      :style="isFullscreen ? 'width: 100%; height: 100%;' : 'aspect-ratio: 16 / 9;'"
       @mousemove="handleMouseMove"
       @mousedown="handleMouseDown"
       @mouseup="handleMouseUp"
@@ -555,6 +637,7 @@ defineExpose({ STATE })
         playsinline
         muted
         class="h-full w-full object-contain pointer-events-none"
+        style="image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;"
       />
 
       <div v-if="state !== STATE.STREAMING" class="flex h-full items-center justify-center text-sm text-slate-400">
@@ -562,7 +645,7 @@ defineExpose({ STATE })
       </div>
     </div>
 
-    <p class="text-xs text-slate-400">
+    <p v-if="!isFullscreen" class="text-xs text-slate-400">
       Streaming & kendali remote berjalan langsung secara aman (P2P WebRTC). Setiap aktivasi kendali dicatat pada audit log.
     </p>
 
