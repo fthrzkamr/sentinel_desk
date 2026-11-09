@@ -31,6 +31,7 @@ from networking.client import (
     send_system_errors,
     send_usb_event,
 )
+from screen.input_controller import enable_dpi_awareness
 from screen.signaling_client import LiveScreenAgent
 from services import autostart, hardening
 from services.secure_storage import load_credentials, save_credentials
@@ -269,6 +270,7 @@ def _apply_remote_policy(
 
 
 def run():
+    enable_dpi_awareness()
     _configure_file_logging()
     signal.signal(signal.SIGINT, _handle_shutdown_signal)
     signal.signal(signal.SIGTERM, _handle_shutdown_signal)

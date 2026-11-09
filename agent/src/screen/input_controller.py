@@ -32,6 +32,50 @@ KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
 KEYEVENTF_SCANCODE = 0x0008
 
+# Extended virtual keys that require KEYEVENTF_EXTENDEDKEY in Windows keybd_event
+EXTENDED_VKS = {
+    0x21,  # PageUp
+    0x22,  # PageDown
+    0x23,  # End
+    0x24,  # Home
+    0x25,  # ArrowLeft
+    0x26,  # ArrowUp
+    0x27,  # ArrowRight
+    0x28,  # ArrowDown
+    0x2C,  # PrintScreen
+    0x2D,  # Insert
+    0x2E,  # Delete
+    0x5B,  # MetaLeft (Win)
+    0x5C,  # MetaRight (Win)
+    0x5D,  # ContextMenu (Apps)
+    0x6F,  # NumpadDivide
+}
+
+
+def enable_dpi_awareness() -> bool:
+    """Sets Per-Monitor DPI Awareness (v2) on Windows so screen coordinates
+    and mouse movement accurately match physical monitor pixels instead of
+    being virtualized/scaled by OS scaling (e.g. 125%, 150%).
+    """
+    try:
+        # Windows 10 1703+ : DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+        return True
+    except Exception:
+        pass
+    try:
+        # Windows 8.1+ : PROCESS_PER_MONITOR_DPI_AWARE = 2
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        return True
+    except Exception:
+        pass
+    try:
+        # Windows Vista+
+        ctypes.windll.user32.SetProcessDPIAware()
+        return True
+    except Exception:
+        return False
+
 # Win32 64-bit / 32-bit compatible structures for SendInput
 class MOUSEINPUT(ctypes.Structure):
     _fields_ = [
@@ -151,6 +195,7 @@ class InputController:
     """Handles translation and execution of remote control events into native Windows actions."""
 
     def __init__(self):
+        enable_dpi_awareness()
         self._user32 = ctypes.windll.user32
         self._sct = None
         self._monitors_cache = None
@@ -182,13 +227,21 @@ class InputController:
             abs_x = int(mon["left"] + norm_x * mon["width"])
             abs_y = int(mon["top"] + norm_y * mon["height"])
 
+            # Clamp coordinates to monitor boundaries to prevent overshoot
+            max_x = mon["left"] + mon["width"] - 1
+            max_y = mon["top"] + mon["height"] - 1
+            abs_x = max(mon["left"], min(abs_x, max_x))
+            abs_y = max(mon["top"], min(abs_y, max_y))
+
             self._user32.SetCursorPos(abs_x, abs_y)
         except Exception as exc:
             logger.debug("mouse_move error: %s", exc)
 
-    def mouse_down(self, button: int = 0):
+    def mouse_down(self, button: int = 0, norm_x: float | None = None, norm_y: float | None = None, monitor_index: int = 1):
         """Button: 0=Left, 1=Middle, 2=Right."""
         try:
+            if norm_x is not None and norm_y is not None:
+                self.mouse_move(norm_x, norm_y, monitor_index)
             flag = MOUSEEVENTF_LEFTDOWN
             if button == 1:
                 flag = MOUSEEVENTF_MIDDLEDOWN
@@ -198,8 +251,10 @@ class InputController:
         except Exception as exc:
             logger.debug("mouse_down error: %s", exc)
 
-    def mouse_up(self, button: int = 0):
+    def mouse_up(self, button: int = 0, norm_x: float | None = None, norm_y: float | None = None, monitor_index: int = 1):
         try:
+            if norm_x is not None and norm_y is not None:
+                self.mouse_move(norm_x, norm_y, monitor_index)
             flag = MOUSEEVENTF_LEFTUP
             if button == 1:
                 flag = MOUSEEVENTF_MIDDLEUP
@@ -236,7 +291,8 @@ class InputController:
 
         if vk and vk > 0:
             try:
-                self._user32.keybd_event(vk, 0, 0, 0)
+                flags = KEYEVENTF_EXTENDEDKEY if vk in EXTENDED_VKS else 0
+                self._user32.keybd_event(vk, 0, flags, 0)
             except Exception as exc:
                 logger.debug("key_down error for %s (%s): %s", key, code, exc)
         else:
@@ -251,7 +307,8 @@ class InputController:
 
         if vk and vk > 0:
             try:
-                self._user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+                flags = KEYEVENTF_KEYUP | (KEYEVENTF_EXTENDEDKEY if vk in EXTENDED_VKS else 0)
+                self._user32.keybd_event(vk, 0, flags, 0)
             except Exception as exc:
                 logger.debug("key_up error for %s (%s): %s", key, code, exc)
 
@@ -362,17 +419,26 @@ class InputController:
             logger.debug("send_shortcut error for %s: %s", shortcut, exc)
 
     def set_clipboard(self, text: str):
-        """Sets text into the target system's Windows clipboard."""
+        """Sets text into the target system's Windows clipboard with retries."""
         try:
             import win32clipboard
+        except ImportError:
+            logger.warning("win32clipboard not installed")
+            return
 
-            win32clipboard.OpenClipboard()
-            win32clipboard.EmptyClipboard()
-            win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
-            win32clipboard.CloseClipboard()
-            logger.info("Remote clipboard updated with %d chars", len(text))
-        except Exception as exc:
-            logger.debug("set_clipboard error: %s", exc)
+        for attempt in range(5):
+            try:
+                win32clipboard.OpenClipboard()
+                try:
+                    win32clipboard.EmptyClipboard()
+                    win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
+                finally:
+                    win32clipboard.CloseClipboard()
+                logger.info("Remote clipboard updated with %d chars", len(text))
+                return
+            except Exception as exc:
+                time.sleep(0.05)
+        logger.debug("Failed to set clipboard after retries")
 
     def handle_control_event(self, event: dict, monitor_index: int = 1):
         """Main dispatcher for incoming control events."""
@@ -389,17 +455,13 @@ class InputController:
             button = event.get("button", 0)
             norm_x = event.get("x")
             norm_y = event.get("y")
-            if norm_x is not None and norm_y is not None:
-                self.mouse_move(norm_x, norm_y, monitor_index)
-            self.mouse_down(button)
+            self.mouse_down(button, norm_x, norm_y, monitor_index)
 
         elif action == "mouse_up":
             button = event.get("button", 0)
             norm_x = event.get("x")
             norm_y = event.get("y")
-            if norm_x is not None and norm_y is not None:
-                self.mouse_move(norm_x, norm_y, monitor_index)
-            self.mouse_up(button)
+            self.mouse_up(button, norm_x, norm_y, monitor_index)
 
         elif action == "mouse_click":
             button = event.get("button", 0)

@@ -89,13 +89,25 @@ function toggleControl() {
 
 function sendControlEvent(event) {
   if (!isControlActive.value) return
-  const payload = JSON.stringify(event)
+  let sent = false
+  try {
+    const payload = JSON.stringify(event)
+    if (controlChannel && controlChannel.readyState === 'open') {
+      controlChannel.send(payload)
+      sent = true
+    }
+  } catch (err) {
+    // DataChannel send failed, fall back to WebSocket
+  }
 
-  if (controlChannel && controlChannel.readyState === 'open') {
-    controlChannel.send(payload)
-  } else if (socket && socket.readyState === WebSocket.OPEN) {
-    // Fallback via WebSocket signaling relay
-    socket.send(JSON.stringify({ type: 'remote_input', event }))
+  if (!sent) {
+    try {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'remote_input', event }))
+      }
+    } catch (err) {
+      // Ignore transient network errors
+    }
   }
 }
 
@@ -262,8 +274,24 @@ async function start() {
       state.value = STATE.STREAMING
     }
 
+    let disconnectTimer = null
     pc.onconnectionstatechange = () => {
-      if (pc && ['failed', 'closed', 'disconnected'].includes(pc.connectionState) && state.value === STATE.STREAMING) {
+      if (!pc) return
+      if (pc.connectionState === 'connected') {
+        if (disconnectTimer) {
+          clearTimeout(disconnectTimer)
+          disconnectTimer = null
+        }
+      } else if (pc.connectionState === 'disconnected') {
+        if (!disconnectTimer) {
+          disconnectTimer = setTimeout(() => {
+            if (pc && pc.connectionState === 'disconnected' && state.value === STATE.STREAMING) {
+              errorMessage.value = 'Koneksi live screen terputus.'
+              stop()
+            }
+          }, 4000)
+        }
+      } else if (['failed', 'closed'].includes(pc.connectionState) && state.value === STATE.STREAMING) {
         errorMessage.value = 'Koneksi live screen terputus.'
         stop()
       }
@@ -328,10 +356,19 @@ async function createAndSendOffer() {
 function waitIceGatheringComplete(connection) {
   if (connection.iceGatheringState === 'complete') return Promise.resolve()
   return new Promise((resolve) => {
+    let finished = false
+    const done = () => {
+      if (!finished) {
+        finished = true
+        connection.removeEventListener('icegatheringstatechange', check)
+        clearTimeout(timer)
+        resolve()
+      }
+    }
+    const timer = setTimeout(done, 2500)
     function check() {
       if (connection.iceGatheringState === 'complete') {
-        connection.removeEventListener('icegatheringstatechange', check)
-        resolve()
+        done()
       }
     }
     connection.addEventListener('icegatheringstatechange', check)
@@ -398,8 +435,8 @@ defineExpose({ STATE })
           "
           @click="toggleControl"
         >
-          <span v-if="isControlActive">🎮 Kendali Aktif</span>
-          <span v-else>👁️ Ambil Kendali (Remote)</span>
+          <span v-if="isControlActive">Kendali Aktif</span>
+          <span v-else>Ambil Kendali (Remote)</span>
         </button>
 
         <!-- Start / Stop buttons -->
@@ -431,7 +468,7 @@ defineExpose({ STATE })
       class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-800 p-2 text-xs text-white shadow-inner"
     >
       <div class="flex items-center gap-1.5 font-medium text-amber-400">
-        <span>⚡ Pintasan Cepat:</span>
+        <span>Pintasan Cepat:</span>
       </div>
 
       <div class="flex flex-wrap items-center gap-1.5">
@@ -472,7 +509,7 @@ defineExpose({ STATE })
           class="flex items-center gap-1 rounded bg-brand-600 px-2.5 py-1 font-medium text-white hover:bg-brand-500"
           @click="showClipboardModal = true"
         >
-          📋 Kirim Teks / Clipboard
+          Kirim Teks / Clipboard
         </button>
       </div>
     </div>
@@ -536,7 +573,7 @@ defineExpose({ STATE })
     >
       <div class="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl space-y-4">
         <div class="flex items-center justify-between border-b pb-3">
-          <h3 class="font-semibold text-slate-800">📋 Kirim Teks ke Laptop Klien</h3>
+          <h3 class="font-semibold text-slate-800">Kirim Teks ke Laptop Klien</h3>
           <button
             type="button"
             class="text-slate-400 hover:text-slate-600"
@@ -575,14 +612,14 @@ defineExpose({ STATE })
             class="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
             @click="sendTypeText"
           >
-            ⌨️ Ketik Langsung
+            Ketik Langsung
           </button>
           <button
             type="button"
             class="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
             @click="sendClipboardText"
           >
-            📋 Salin ke Clipboard Klien
+            Salin ke Clipboard Klien
           </button>
         </div>
       </div>
