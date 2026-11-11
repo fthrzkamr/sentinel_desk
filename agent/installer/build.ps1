@@ -33,6 +33,22 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $agentDist = Join-Path $root "..\dist"
 $payload = Join-Path $root "payload"
 
+if (-not $ServerUrl) {
+    try {
+        $pyPath = Join-Path $root "..\venv\Scripts\python.exe"
+        if (Test-Path $pyPath) {
+            $ip = & $pyPath -c "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(('8.8.8.8', 80)); print(s.getsockname()[0]); s.close()"
+            if ($ip) {
+                $ServerUrl = "http://$($ip.Trim()):8000"
+            }
+        }
+    } catch {}
+}
+if (-not $ServerUrl) {
+    $ServerUrl = "http://192.168.99.243:8000"
+}
+Write-Host "Target Server URL: $ServerUrl"
+
 if (-not (Test-Path (Join-Path $agentDist "SentinelDeskAgent.exe"))) {
     throw "agent\dist\SentinelDeskAgent.exe not found - build the agent first (pyinstaller --clean --noconfirm ..\SentinelDeskAgent.spec)."
 }
@@ -62,7 +78,7 @@ Copy-Item (Join-Path $agentDist "SentinelDeskWatchdog") (Join-Path $payload "Sen
 # real values as later lines in this same file after it's copied into
 # place (python-dotenv resolves a repeated key to its last occurrence).
 $envContent = @"
-SERVER_URL=$($ServerUrl -or "http://DESKTOP-U4KO690:8000")
+SERVER_URL=$ServerUrl
 ENROLLMENT_TOKEN=$EnrollmentToken
 MONITOR_INTERVAL=15
 INSTALLED_VIA_MSI=true
