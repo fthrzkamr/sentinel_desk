@@ -415,7 +415,14 @@ async function start() {
 
 async function createAndSendOffer() {
   const offer = await pc.createOffer()
-  await pc.setLocalDescription(offer)
+  let sdp = offer.sdp
+
+  // Boost video bandwidth allocation to 6 Mbps so browser requests crisp, uncompressed text
+  sdp = sdp.replace(/m=video ([^\r\n]+)\r\n/g, (match) => {
+    return `${match}b=AS:6000\r\nb=TIAS:6000000\r\n`
+  })
+
+  await pc.setLocalDescription({ type: 'offer', sdp })
   await waitIceGatheringComplete(pc)
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type: 'webrtc_offer', sdp: pc.localDescription.sdp }))
@@ -782,7 +789,6 @@ defineExpose({ STATE })
         playsinline
         muted
         class="h-full w-full object-contain pointer-events-none select-none"
-        style="image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;"
       />
 
       <div v-if="state === STATE.CONNECTING" class="flex flex-col items-center justify-center p-6 text-center space-y-3">

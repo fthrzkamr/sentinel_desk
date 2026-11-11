@@ -15,7 +15,7 @@ from PIL import Image
 
 VIDEO_CLOCK_RATE = 90000
 DEFAULT_FPS = 15
-DEFAULT_MAX_WIDTH = 1920
+DEFAULT_MAX_WIDTH = 2560
 
 
 def get_available_monitors() -> list[dict]:
@@ -106,7 +106,8 @@ class ScreenShareTrack(VideoStreamTrack):
             target_w -= target_w % 2
             target_h -= target_h % 2
             pil_img = Image.fromarray(img[:, :, ::-1])  # BGR -> RGB for PIL
-            pil_img = pil_img.resize((target_w, target_h), Image.BICUBIC)
+            resample_filter = getattr(getattr(Image, "Resampling", Image), "LANCZOS", Image.BICUBIC)
+            pil_img = pil_img.resize((target_w, target_h), resample_filter)
             img = np.array(pil_img)[:, :, ::-1].copy()  # RGB -> BGR back
         else:
             # Ensure width and height are even numbers

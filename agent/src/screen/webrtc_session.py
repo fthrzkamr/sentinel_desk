@@ -12,21 +12,78 @@ from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSession
 from screen.capture_track import ScreenShareTrack
 from screen.input_controller import InputController
 
-# Upgrade aiortc's internal encoder bitrates for crisp desktop streaming
-# (prevents blurry macroblocks / low-res artifacts on 1080p screen share)
+# Upgrade aiortc's internal encoder bitrates and parameters for crisp desktop streaming
+# (prevents blurry macroblocks, downsampled text, and low-res artifacts on desktop streaming)
 try:
     import aiortc.codecs.h264 as h264_codec
 
-    h264_codec.DEFAULT_BITRATE = 3_500_000
-    h264_codec.MAX_BITRATE = 8_000_000
+    h264_codec.MIN_BITRATE = 2_000_000
+    h264_codec.DEFAULT_BITRATE = 4_000_000
+    h264_codec.MAX_BITRATE = 10_000_000
 except Exception:
     pass
 
 try:
     import aiortc.codecs.vpx as vpx_codec
 
-    vpx_codec.DEFAULT_BITRATE = 2_500_000
-    vpx_codec.MAX_BITRATE = 6_000_000
+    vpx_codec.MIN_BITRATE = 2_000_000
+    vpx_codec.DEFAULT_BITRATE = 4_000_000
+    vpx_codec.MAX_BITRATE = 10_000_000
+
+    # Patch Vp8Encoder for crystal-clear desktop text:
+    # 1. qmax=30 (instead of default 56) eliminates severe lossy compression & blur
+    # 2. noise-sensitivity=0 disables webcam noise-filtering which blurs small UI fonts
+    def _tuned_vp8_encode(self, frame, force_keyframe: bool = False):
+        assert isinstance(frame, vpx_codec.VideoFrame)
+        if frame.format.name != "yuv420p":
+            frame = frame.reformat(format="yuv420p")
+
+        if self.codec and (
+            frame.width != self.codec.width
+            or frame.height != self.codec.height
+            or abs(self.target_bitrate - self.codec.bit_rate) / self.codec.bit_rate > 0.1
+        ):
+            self.codec = None
+
+        if force_keyframe:
+            frame.pict_type = vpx_codec.av.video.frame.PictureType.I
+
+        if self.codec is None:
+            self.codec = vpx_codec.av.CodecContext.create("libvpx", "w")
+            self.codec.width = frame.width
+            self.codec.height = frame.height
+            self.codec.bit_rate = max(2_000_000, self.target_bitrate)
+            self.codec.pix_fmt = "yuv420p"
+            self.codec.gop_size = 1800
+            self.codec.qmin = 2
+            self.codec.qmax = 30
+            self.codec.options = {
+                "bufsize": str(max(2_000_000, self.target_bitrate)),
+                "cpu-used": "-6",
+                "deadline": "realtime",
+                "lag-in-frames": "0",
+                "minrate": str(max(2_000_000, self.target_bitrate)),
+                "maxrate": str(max(4_000_000, self.target_bitrate)),
+                "noise-sensitivity": "0",
+                "overshoot-pct": "15",
+                "partitions": "0",
+                "static-thresh": "0",
+                "undershoot-pct": "100",
+            }
+            self.codec.thread_count = vpx_codec.number_of_threads(
+                frame.width * frame.height, vpx_codec.multiprocessing.cpu_count()
+            )
+
+        data_to_send = b""
+        for package in self.codec.encode(frame):
+            data_to_send += bytes(package)
+
+        payloads = self._packetize(data_to_send, self.picture_id)
+        timestamp = vpx_codec.convert_timebase(frame.pts, frame.time_base, vpx_codec.VIDEO_TIME_BASE)
+        self.picture_id = (self.picture_id + 1) % (1 << 15)
+        return payloads, timestamp
+
+    vpx_codec.Vp8Encoder.encode = _tuned_vp8_encode
 except Exception:
     pass
 
