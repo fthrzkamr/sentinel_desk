@@ -463,13 +463,148 @@ defineExpose({ STATE })
     ref="fullscreenContainerEl"
     :class="
       isFullscreen
-        ? 'fixed inset-0 z-50 flex flex-col bg-slate-950 p-4 space-y-3 overflow-hidden'
+        ? 'fixed inset-0 z-50 flex flex-col bg-slate-950 p-0 overflow-hidden'
         : 'space-y-3'
     "
   >
-    <!-- Header Controls -->
-    <div class="flex flex-wrap items-center justify-between gap-2">
-      <div class="flex items-center gap-2 text-sm">
+    <!-- FULLSCREEN COMPACT UNIFIED TOOLBAR -->
+    <div
+      v-if="isFullscreen"
+      class="flex h-11 shrink-0 items-center justify-between border-b border-slate-800 bg-slate-900/95 px-3 text-xs text-white"
+    >
+      <!-- Left: Status & Mode -->
+      <div class="flex items-center gap-2.5">
+        <div class="flex items-center gap-2">
+          <span
+            class="h-2 w-2 rounded-full"
+            :class="{
+              'bg-slate-400': state === STATE.IDLE,
+              'bg-amber-400 animate-pulse': state === STATE.CONNECTING,
+              'bg-emerald-500': state === STATE.STREAMING,
+              'bg-red-500': state === STATE.ERROR,
+            }"
+          />
+          <span class="font-medium text-slate-200">
+            {{
+              {
+                idle: 'Tidak aktif',
+                connecting: permissionStatus || 'Menghubungkan...',
+                streaming: 'Streaming aktif',
+                error: 'Error',
+              }[state]
+            }}
+          </span>
+        </div>
+
+        <span
+          v-if="state === STATE.STREAMING"
+          class="rounded px-2 py-0.5 text-[11px] font-semibold tracking-wide"
+          :class="
+            isControlActive
+              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+              : 'bg-slate-800 text-slate-400 border border-slate-700'
+          "
+        >
+          {{ isControlActive ? 'KENDALI AKTIF' : 'MODE PANTAU' }}
+        </span>
+
+        <!-- Monitor Selector -->
+        <div v-if="state === STATE.STREAMING && monitors.length > 1" class="flex items-center gap-1.5 ml-1">
+          <label class="text-slate-400">Layar:</label>
+          <select
+            v-model="activeMonitor"
+            class="rounded border border-slate-700 bg-slate-800 px-2 py-0.5 text-xs text-slate-200 focus:outline-none"
+            @change="switchMonitor(activeMonitor)"
+          >
+            <option v-for="m in monitors" :key="m.index" :value="m.index">
+              {{ m.name }}
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Center: Shortcuts when control is active -->
+      <div v-if="state === STATE.STREAMING && isControlActive" class="hidden sm:flex items-center gap-1.5">
+        <span class="text-[11px] text-slate-400 font-medium mr-1">Pintasan:</span>
+        <button
+          type="button"
+          class="rounded bg-slate-800 px-2 py-1 font-mono text-slate-200 hover:bg-slate-700 border border-slate-700 transition-colors"
+          title="Tampilkan Desktop (Minimize Semua Jendela)"
+          @click="sendShortcut('win_d')"
+        >
+          Win + D
+        </button>
+        <button
+          type="button"
+          class="rounded bg-slate-800 px-2 py-1 font-mono text-slate-200 hover:bg-slate-700 border border-slate-700 transition-colors"
+          title="Buka dialog Run Windows"
+          @click="sendShortcut('win_r')"
+        >
+          Win + R
+        </button>
+        <button
+          type="button"
+          class="rounded bg-slate-800 px-2 py-1 font-mono text-slate-200 hover:bg-slate-700 border border-slate-700 transition-colors"
+          title="Pindah Jendela Aplikasi"
+          @click="sendShortcut('alt_tab')"
+        >
+          Alt + Tab
+        </button>
+        <button
+          type="button"
+          class="rounded bg-slate-800 px-2 py-1 font-mono text-slate-200 hover:bg-slate-700 border border-slate-700 transition-colors"
+          title="Buka Task Manager"
+          @click="sendShortcut('task_mgr')"
+        >
+          Ctrl + Shift + Esc
+        </button>
+        <button
+          type="button"
+          class="rounded bg-brand-600 px-2.5 py-1 font-medium text-white hover:bg-brand-500 transition-colors"
+          title="Kirim Teks atau Salin ke Clipboard Klien"
+          @click="showClipboardModal = true"
+        >
+          Kirim Teks
+        </button>
+      </div>
+
+      <!-- Right: Action Buttons -->
+      <div class="flex items-center gap-2">
+        <button
+          v-if="state === STATE.STREAMING"
+          type="button"
+          class="rounded px-2.5 py-1 text-xs font-semibold transition-all shadow-sm"
+          :class="
+            isControlActive
+              ? 'bg-amber-500 text-white hover:bg-amber-600'
+              : 'border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
+          "
+          @click="toggleControl"
+        >
+          {{ isControlActive ? 'Kendali Aktif' : 'Ambil Kendali' }}
+        </button>
+
+        <button
+          type="button"
+          class="rounded border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-semibold text-slate-200 hover:bg-slate-700 transition-colors shadow-sm"
+          @click="toggleFullscreen"
+        >
+          Perkecil (Minimize)
+        </button>
+
+        <button
+          type="button"
+          class="rounded bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 transition-colors shadow-sm"
+          @click="stop"
+        >
+          Hentikan
+        </button>
+      </div>
+    </div>
+
+    <!-- NORMAL (IN-CARD) HEADER CONTROLS -->
+    <div v-else class="flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center gap-2.5 text-sm">
         <span
           class="h-2 w-2 rounded-full"
           :class="{
@@ -479,7 +614,7 @@ defineExpose({ STATE })
             'bg-red-500': state === STATE.ERROR,
           }"
         />
-        <span :class="isFullscreen ? 'text-slate-200 font-medium' : 'text-slate-500 font-medium'">
+        <span class="text-slate-600 font-medium">
           {{
             {
               idle: 'Tidak aktif',
@@ -489,12 +624,24 @@ defineExpose({ STATE })
             }[state]
           }}
         </span>
+
+        <span
+          v-if="state === STATE.STREAMING"
+          class="rounded px-2 py-0.5 text-xs font-semibold"
+          :class="
+            isControlActive
+              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+              : 'bg-slate-100 text-slate-600 border border-slate-200'
+          "
+        >
+          {{ isControlActive ? 'KENDALI AKTIF' : 'MODE PANTAU' }}
+        </span>
       </div>
 
       <div class="flex items-center gap-2">
         <!-- Monitor Selector -->
         <div v-if="state === STATE.STREAMING && monitors.length > 1" class="flex items-center gap-1.5">
-          <label class="text-xs font-medium" :class="isFullscreen ? 'text-slate-300' : 'text-slate-500'">Layar:</label>
+          <label class="text-xs font-medium text-slate-500">Layar:</label>
           <select
             v-model="activeMonitor"
             class="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
@@ -529,7 +676,7 @@ defineExpose({ STATE })
           class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 transition-all"
           @click="toggleFullscreen"
         >
-          {{ isFullscreen ? 'Perkecil (Minimize)' : 'Layar Penuh (Full)' }}
+          Layar Penuh (Full)
         </button>
 
         <!-- Start / Stop buttons -->
@@ -555,9 +702,9 @@ defineExpose({ STATE })
       {{ errorMessage }}
     </div>
 
-    <!-- Quick Shortcuts Toolbar (Shown when Remote Control is Active) -->
+    <!-- Quick Shortcuts Toolbar (Shown in normal mode when Remote Control is Active) -->
     <div
-      v-if="state === STATE.STREAMING && isControlActive"
+      v-if="!isFullscreen && state === STATE.STREAMING && isControlActive"
       class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-800 p-2 text-xs text-white shadow-inner"
     >
       <div class="flex items-center gap-1.5 font-medium text-amber-400">
@@ -568,18 +715,18 @@ defineExpose({ STATE })
         <button
           type="button"
           class="rounded bg-slate-700 px-2 py-1 font-mono hover:bg-slate-600 active:bg-slate-500"
-          title="Buka dialog Run Windows"
-          @click="sendShortcut('win_r')"
-        >
-          Win + R
-        </button>
-        <button
-          type="button"
-          class="rounded bg-slate-700 px-2 py-1 font-mono hover:bg-slate-600 active:bg-slate-500"
           title="Tampilkan Desktop"
           @click="sendShortcut('win_d')"
         >
           Win + D
+        </button>
+        <button
+          type="button"
+          class="rounded bg-slate-700 px-2 py-1 font-mono hover:bg-slate-600 active:bg-slate-500"
+          title="Buka dialog Run Windows"
+          @click="sendShortcut('win_r')"
+        >
+          Win + R
         </button>
         <button
           type="button"
@@ -611,12 +758,12 @@ defineExpose({ STATE })
     <div
       ref="screenContainerEl"
       tabindex="0"
-      class="relative overflow-hidden rounded-lg bg-slate-900 outline-none transition-all flex items-center justify-center"
+      class="relative overflow-hidden bg-slate-950 outline-none transition-all flex items-center justify-center"
       :class="[
         isControlActive
-          ? 'ring-2 ring-amber-500 cursor-crosshair'
+          ? 'cursor-crosshair'
           : 'cursor-default',
-        isFullscreen ? 'flex-1 min-h-0 w-full' : ''
+        isFullscreen ? 'flex-1 min-h-0 w-full rounded-none' : 'rounded-lg ring-1 ring-slate-800'
       ]"
       :style="isFullscreen ? 'width: 100%; height: 100%;' : 'aspect-ratio: 16 / 9;'"
       @mousemove="handleMouseMove"
@@ -628,27 +775,13 @@ defineExpose({ STATE })
       @keydown="handleKeyDown"
       @keyup="handleKeyUp"
     >
-      <!-- Remote Control Status Banner Overlay -->
-      <div
-        v-if="state === STATE.STREAMING"
-        class="absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full bg-slate-900/80 px-2.5 py-1 text-[11px] backdrop-blur font-medium text-white shadow pointer-events-none"
-      >
-        <span
-          class="h-2 w-2 rounded-full"
-          :class="isControlActive ? 'bg-amber-400 animate-ping' : 'bg-emerald-400'"
-        />
-        <span>
-          {{ isControlActive ? 'KENDALI AKTIF (Klik area untuk ketik)' : 'MODE PANTAU (Hanya Melihat)' }}
-        </span>
-      </div>
-
       <video
         v-show="state === STATE.STREAMING"
         ref="videoEl"
         autoplay
         playsinline
         muted
-        class="h-full w-full object-contain pointer-events-none"
+        class="h-full w-full object-contain pointer-events-none select-none"
         style="image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;"
       />
 
